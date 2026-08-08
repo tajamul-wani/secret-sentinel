@@ -1,0 +1,15 @@
+[project]
+name = "secret-sentinel"
+version = "0.1.0"
+description = "Local AI-assisted secret scanner for Git pre-commit hooks."
+authors = ["Secret Sentinel Team <dev@secretsentinel.example>"]
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+
+[project.scripts]
+secret-sentinel = "secret_sentinel.cli:main"
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
