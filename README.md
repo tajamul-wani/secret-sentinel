@@ -82,3 +82,7 @@ ai_enabled = false
 If you have local Ollama installed, `secret-sentinel` will attempt to validate flagged findings with a local model.
 
 For Gemini cloud validation, set `GEMINI_API_KEY` in your environment.
+
+## Contributing
+
+Contributions are welcome. Create a fork, add tests for new patterns or behavior, and open a pull request with a clear description of the change.
