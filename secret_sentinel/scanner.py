@@ -1,24 +1,37 @@
+import fnmatch
 import os
 import re
 import subprocess
-from typing import List, Dict, Optional
+from pathlib import Path
+from typing import Dict, List, Optional
 
-from .utils import shannon_entropy, is_text_bytes
+from .utils import is_text_bytes, shannon_entropy
 
 SECRET_PATTERNS = {
     "AWS Secret Access Key": re.compile(r"\b(?:AKIA|ASIA|AGPA|AIDA|ANPA|AROA|AIPA|ANVA)[0-9A-Z]{16}\b"),
     "Google API Key": re.compile(r"\bAIza[0-9A-Za-z\-_]{35}\b"),
+    "Stripe API Key": re.compile(r"\bpk_(?:test|live)_[A-Za-z0-9]{24}\b"),
     "GitHub Token": re.compile(r"\bghp_[A-Za-z0-9_]{36}\b"),
     "Slack Token": re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{10,}\b"),
-    "SSH Private Key": re.compile(r"-----BEGIN (?:RSA|DSA|EC|OPENSSH|PRIVATE) KEY-----"),
     "JWT": re.compile(r"\beyJ[0-9A-Za-z_\-]+\.[0-9A-Za-z_\-]+\.[0-9A-Za-z_\-]+\b"),
+    "Twilio Secret Key": re.compile(r"\bSK[0-9a-fA-F]{32}\b"),
     "Generic Secret Assignment": re.compile(
-        r"(?i)\b(?:api[_\-]?key|secret|token|password|passwd|auth|credential|client_secret|private_key)\b\s*[:=]\s*[\"']?([A-Za-z0-9_\-+\/=]{16,})[\"']?"
+        r"(?i)\b(?:api[_\-]?key|secret|token|password|passwd|auth|credential|client_secret|private_key|oauth[_\-]?token)\b\s*[:=]\s*[\"']?([A-Za-z0-9_\-+\/=]{16,})[\"']?"
     ),
 }
 SECRET_STRING_PATTERN = re.compile(r"[\"']([A-Za-z0-9+/=_.-]{24,})[\"']")
 ENTROPY_THRESHOLD = 4.6
 MIN_ENTROPY_LENGTH = 24
+DEFAULT_IGNORE = [
+    "__pycache__/*",
+    "*.py[cod]",
+    "*.pyo",
+    "*.pyd",
+    ".git/*",
+    "venv/*",
+    ".venv/*",
+    "node_modules/*",
+]
 
 
 def _run_git_command(args: List[str], cwd: Optional[str] = None, text: bool = True):
@@ -58,8 +71,27 @@ def get_staged_content(path: str) -> Optional[str]:
     return data
 
 
+def _normalize_path(path: str) -> str:
+    return path.replace(os.sep, "/")
+
+
+def _is_ignored(path: str, ignore_globs: List[str], repo_root: Optional[str] = None) -> bool:
+    normalized_path = _normalize_path(path)
+    rel_path = normalized_path
+    if repo_root:
+        try:
+            rel_path = _normalize_path(os.path.relpath(path, repo_root))
+        except ValueError:
+            rel_path = normalized_path
+    for pattern in ignore_globs:
+        normalized_pattern = _normalize_path(pattern)
+        if fnmatch.fnmatch(rel_path, normalized_pattern) or fnmatch.fnmatch(normalized_path, normalized_pattern):
+            return True
+    return False
+
+
 def _line_has_secret_keyword(line: str) -> bool:
-    return bool(re.search(r"(?i)\b(secret|token|api[_\-]?key|password|passwd|auth|credential|client_secret|private_key)\b", line))
+    return bool(re.search(r"(?i)\b(secret|token|api[_\-]?key|password|passwd|auth|credential|client_secret|private_key|oauth[_\-]?token)\b", line))
 
 
 def scan_text(content: str, source: str) -> List[Dict[str, object]]:
@@ -103,9 +135,13 @@ def scan_text(content: str, source: str) -> List[Dict[str, object]]:
     return issues
 
 
-def scan_staged_files() -> List[Dict[str, object]]:
+def scan_staged_files(ignore_globs: List[str] = None, repo_root: Optional[str] = None) -> List[Dict[str, object]]:
     issues = []
+    ignore_globs = ignore_globs or DEFAULT_IGNORE
     for path in get_staged_paths():
+        absolute_path = os.path.join(repo_root or os.getcwd(), path)
+        if _is_ignored(absolute_path, ignore_globs, repo_root):
+            continue
         content = get_staged_content(path)
         if content is None:
             continue
@@ -113,18 +149,36 @@ def scan_staged_files() -> List[Dict[str, object]]:
     return issues
 
 
-def scan_paths(paths: List[str]) -> List[Dict[str, object]]:
+def scan_paths(paths: List[str], ignore_globs: List[str] = None, repo_root: Optional[str] = None) -> List[Dict[str, object]]:
     issues = []
+    ignore_globs = ignore_globs or DEFAULT_IGNORE
     for path in paths:
         if os.path.isdir(path):
-            for root, _, files in os.walk(path):
+            for root, dirs, files in os.walk(path):
+                if _is_ignored(root, ignore_globs, repo_root):
+                    dirs[:] = []
+                    continue
                 if ".git" in root.split(os.sep):
+                    dirs[:] = []
                     continue
                 for file_name in files:
                     full_path = os.path.join(root, file_name)
-                    issues.extend(scan_paths([full_path]))
+                    if _is_ignored(full_path, ignore_globs, repo_root):
+                        continue
+                    try:
+                        with open(full_path, "rb") as handle:
+                            data = handle.read(2048)
+                            if not is_text_bytes(data):
+                                continue
+                        with open(full_path, "r", encoding="utf-8", errors="replace") as handle:
+                            content = handle.read()
+                    except OSError:
+                        continue
+                    issues.extend(scan_text(content, full_path))
             continue
         if not os.path.isfile(path):
+            continue
+        if _is_ignored(path, ignore_globs, repo_root):
             continue
         try:
             with open(path, "rb") as handle:
@@ -142,7 +196,7 @@ def scan_paths(paths: List[str]) -> List[Dict[str, object]]:
 def summarize_issues(issues: List[Dict[str, object]]) -> str:
     if not issues:
         return ""
-    lines = ["Detected potential secrets:"]
+    lines = [f"Detected potential secrets ({len(issues)}):"]
     for issue in issues:
         entry = (
             f"{issue['source']}:{issue['line']} [{issue['matcher']}] - {issue['snippet']}"
