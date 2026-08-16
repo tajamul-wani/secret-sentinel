@@ -1,65 +1,85 @@
-# secret-sentinel
+# Secret Sentinel
 
-`secret-sentinel` is a lightweight Python CLI tool and Git pre-commit hook that prevents hardcoded API keys and secrets from being committed to Git.
+Secret Sentinel is a lightweight local secret scanner for Git repositories. It helps catch hardcoded secrets before they are committed, using built-in pattern checks and entropy-based detection.
 
-`secret-sentinel` is safe by default: built-in scanning runs locally without requiring any environment variables.
+It is designed to work without requiring a cloud API or environment variables for normal usage.
 
-## Features
+## What it does
 
-- Local regex-based secret detection
-- Shannon entropy scanning for high-entropy strings
-- Optional AI context validation using Ollama or Gemini
-- Git pre-commit hook installer
+- scans staged files before commit
+- scans selected files or folders manually
+- looks for common secret formats and high-entropy strings
+- can optionally use AI validation when available
+- can be installed as a Git pre-commit hook
 
-## Installation
+## Install
+
+From the project root:
 
 ```bash
 python -m pip install .
 ```
 
-## Usage
+Or, in a project you want to protect:
 
-Scan staged files:
+```bash
+python -m pip install "git+https://github.com/your-org/secret-sentinel.git"
+```
+
+## Run it locally
+
+Scan staged changes:
 
 ```bash
 secret-sentinel --staged
 ```
 
-Scan specific files or folders:
+Scan a specific file or folder:
 
 ```bash
-secret-sentinel src/ tests/
+secret-sentinel .
+secret-sentinel src/
+secret-sentinel .env.example
 ```
 
 Skip AI validation:
 
 ```bash
-secret-sentinel --no-ai
+secret-sentinel --staged --no-ai
 ```
 
-Install Git hook:
+Install the Git pre-commit hook:
 
 ```bash
 secret-sentinel --install-hook
 ```
 
-Uninstall Git hook:
+Remove the hook:
 
 ```bash
 secret-sentinel --uninstall-hook
 ```
 
-Debug mode:
+## Use inside another project
+
+1. Install the tool in the target repo.
+2. Run the hook installer once:
 
 ```bash
-secret-sentinel --debug --staged
+secret-sentinel --install-hook
+```
+
+3. Commit normally. The tool will scan staged files before the commit is accepted.
+
+If you want to test manually without a hook:
+
+```bash
+secret-sentinel --staged
 ```
 
 ## Configuration
 
-Create a `.secret-sentinel.ini` in your repository root to customize behavior.
-
-Example:
+Create a `.secret-sentinel.ini` in the repository root:
 
 ```ini
 [secret-sentinel]
@@ -67,22 +87,18 @@ ignore_paths = tests/*, docs/*
 ai_enabled = false
 ```
 
-## Safety and environment
+This helps exclude known-safe paths or fixtures.
 
-`secret-sentinel` is safe to use by default and does not require any environment variables for its built-in scanning.
+## Safety model
 
-- Tier 1 scanning is completely local: regex patterns and entropy checks run on staged or selected files.
-- AI context validation is optional.
-- No environment variables are needed unless you want to use Gemini cloud validation.
-- If you do use Gemini, set `GEMINI_API_KEY` in your environment.
-- Local Ollama validation is also optional and only used when installed.
+- built-in scanning is local and does not require environment variables
+- AI validation is optional and only used if enabled
+- the default experience is safe and offline-friendly
 
-## AI Context Validation
+## Optional AI validation
 
-If you have local Ollama installed, `secret-sentinel` will attempt to validate flagged findings with a local model.
-
-For Gemini cloud validation, set `GEMINI_API_KEY` in your environment.
+If you want stronger validation, you can enable AI checking through a local Ollama setup or a configured Gemini integration. This is optional and not required for the core scanner to work.
 
 ## Contributing
 
-Contributions are welcome. Create a fork, add tests for new patterns or behavior, and open a pull request with a clear description of the change.
+Contributions are welcome. Keep changes focused, keep the tool safe by default, and avoid adding internal notes or private metadata to public project files.
