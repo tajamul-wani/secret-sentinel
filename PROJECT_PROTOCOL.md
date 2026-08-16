@@ -3,13 +3,18 @@
 ## Core ownership and identity rules
 
 1. This project belongs to the repository owner and is not to be treated as a shared public identity project.
-2. Commit author identity may use the owner’s current Git identity, but that identity is for local commit metadata only and is not required in public project files.
+2. The normal Git commit flow is allowed to use the owner’s current Git identity, including the owner’s current name and email, for local commit metadata.
 3. Public-facing project metadata must not expose the owner’s personal email address.
 4. If an email is needed in public metadata, use a neutral dummy or project email such as:
    - hello@secretsentinel.example
    - support@secretsentinel.example
 5. Public files must never include the owner’s personal email or personal username in metadata, docs, or config unless explicitly requested.
 6. The owner’s personal Git identity belongs in local Git config and commit metadata, not in public project files.
+7. The repo’s public metadata and the local Git identity are separate things. One is for GitHub/public history; the other is for local commit attribution.
+8. If GitHub blocks a push because the email is private, the fix is to either:
+   - make the email public in GitHub settings, or
+   - use the GitHub noreply address for commit identity while keeping public project files neutral.
+9. The normal commit flow is still valid; the public repo metadata and GitHub email privacy rules are separate concerns.
 
 ## Secret and environment safety rules
 
@@ -41,6 +46,9 @@
 4. Local testing should happen first, and the user should explicitly approve before any commit or merge is made.
 5. If a command is likely to change files, the user must approve it before executing.
 6. Files or folders which are not needed for this application/project to work must not be committed and kept in gitignore.
+7. If a push is blocked by GitHub email privacy restrictions, the user must approve whether to:
+   - make the email public, or
+   - use a GitHub noreply email for the public-safe commit identity.
 
 ## Repository hygiene rules
 
