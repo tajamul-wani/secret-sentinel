@@ -23,4 +23,5 @@ Thumbs.db
 .vscode/*
 !.vscode/tasks.json
 !run_secret_sentinel.ps1
+PROJECT_PROTOCOL.md
 .idea/
