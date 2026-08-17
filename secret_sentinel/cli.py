@@ -14,6 +14,8 @@ from .scanner import (
     summarize_issues,
 )
 from .ai_validator import validate_issues
+from .history import ScanHistory
+from .risk_scoring import calculate_overall_severity
 
 
 def parse_args() -> argparse.Namespace:
@@ -50,6 +52,27 @@ def parse_args() -> argparse.Namespace:
         "--debug",
         action="store_true",
         help="Print debug information during scanning.",
+    )
+    parser.add_argument(
+        "--history",
+        action="store_true",
+        help="Show scan history.",
+    )
+    parser.add_argument(
+        "--stats",
+        action="store_true",
+        help="Show scan statistics.",
+    )
+    parser.add_argument(
+        "--history-limit",
+        type=int,
+        default=10,
+        help="Number of history records to show (default: 10).",
+    )
+    parser.add_argument(
+        "--clear-history",
+        action="store_true",
+        help="Clear all scan history.",
     )
     parser.add_argument(
         "--version",
@@ -136,15 +159,81 @@ def scan_paths(paths: List[str], no_ai: bool, staged: bool, debug: bool = False)
 def main(argv=None) -> int:
     args = parse_args() if argv is None else parse_args_from(argv)
     repo_root = get_git_root() or os.getcwd()
+    
+    # Handle history and stats commands
+    if args.history or args.stats or args.clear_history:
+        history_manager = ScanHistory(repo_root)
+        
+        if args.clear_history:
+            history_manager.clear_history()
+            print("Scan history cleared.")
+            return 0
+        
+        if args.history:
+            history_records = history_manager.get_history(limit=args.history_limit)
+            if not history_records:
+                print("No scan history found.")
+                return 0
+            
+            print("=" * 80)
+            print("SCAN HISTORY (latest first)")
+            print("=" * 80)
+            for i, record in enumerate(history_records, 1):
+                print(f"\n[{i}] {record['timestamp']}")
+                print(f"    Type: {record['scan_type']}")
+                print(f"    Status: {record['status']}")
+                print(f"    Total issues: {record['total_issues']}")
+                severity = record.get('severity_counts', {})
+                if severity:
+                    print(f"    Severity breakdown:")
+                    for level, count in severity.items():
+                        if count > 0:
+                            print(f"      {level}: {count}")
+            return 0
+        
+        if args.stats:
+            stats = history_manager.get_statistics()
+            if stats['total_scans'] == 0:
+                print("No scan statistics available.")
+                return 0
+            
+            print("=" * 80)
+            print("SCAN STATISTICS")
+            print("=" * 80)
+            print(f"Total scans: {stats['total_scans']}")
+            print(f"Total issues found: {stats['total_issues_found']}")
+            print("\nSeverity summary:")
+            for level, count in stats['severity_summary'].items():
+                if count > 0:
+                    print(f"  {level}: {count}")
+            print("\nScans by type:")
+            for scan_type, count in stats['scan_types'].items():
+                print(f"  {scan_type}: {count}")
+            
+            if stats['latest_scan']:
+                latest = stats['latest_scan']
+                print(f"\nLatest scan: {latest['timestamp']}")
+            return 0
+    
     if args.install_hook:
         install_git_hook(repo_root)
         return 0
     if args.uninstall_hook:
         uninstall_git_hook(repo_root)
         return 0
+    
     issues = scan_paths(args.paths, args.no_ai, staged=args.staged, debug=args.debug)
+    
+    # Record scan in history
+    history_manager = ScanHistory(repo_root)
+    scan_type = "staged" if args.staged else "manual"
+    status = "blocked" if issues else "completed"
+    history_manager.record_scan(issues, scan_type=scan_type, status=status)
+    
     if issues:
         print(summarize_issues(issues))
+        overall_severity = calculate_overall_severity(issues)
+        print(f"Overall severity: {overall_severity}")
         print("Commit blocked: secret-sentinel detected potential hardcoded secrets.")
         return 1
     print("secret-sentinel scan passed.")
@@ -185,6 +274,27 @@ def parse_args_from(argv: List[str]) -> argparse.Namespace:
         "--debug",
         action="store_true",
         help="Print debug information during scanning.",
+    )
+    parser.add_argument(
+        "--history",
+        action="store_true",
+        help="Show scan history.",
+    )
+    parser.add_argument(
+        "--stats",
+        action="store_true",
+        help="Show scan statistics.",
+    )
+    parser.add_argument(
+        "--history-limit",
+        type=int,
+        default=10,
+        help="Number of history records to show (default: 10).",
+    )
+    parser.add_argument(
+        "--clear-history",
+        action="store_true",
+        help="Clear all scan history.",
     )
     parser.add_argument(
         "--version",
