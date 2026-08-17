@@ -48,6 +48,39 @@ Skip AI validation:
 secret-sentinel --staged --no-ai
 ```
 
+### Risk Scoring
+
+Each detected secret is assigned a severity level based on its type:
+
+- **CRITICAL**: AWS keys, API tokens (Stripe, GitHub, Slack, Google), Twilio keys
+- **HIGH**: JWT tokens, generic secret assignments
+- **MEDIUM**: High-entropy strings detected via pattern matching
+- **LOW**: Other potential secrets
+
+The overall severity of a scan is determined by the highest severity issue found.
+
+### History and Statistics
+
+Track scan results over time:
+
+```bash
+# View recent scans (last 10 by default)
+secret-sentinel --history
+
+# View more history records
+secret-sentinel --history --history-limit 20
+
+# View aggregated statistics
+secret-sentinel --stats
+
+# Clear scan history
+secret-sentinel --clear-history
+```
+
+History is stored locally in `.secret-sentinel/scan_history.jsonl` and includes timestamps, issue counts, and severity breakdowns.
+
+### Installing Git Hook
+
 Install the Git pre-commit hook:
 
 ```bash

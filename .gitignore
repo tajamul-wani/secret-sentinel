@@ -25,3 +25,4 @@ Thumbs.db
 !run_secret_sentinel.ps1
 PROJECT_PROTOCOL.md
 .idea/
+.secret-sentinel/
