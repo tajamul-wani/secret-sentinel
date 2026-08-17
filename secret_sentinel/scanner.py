@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from .utils import is_text_bytes, shannon_entropy
+from .risk_scoring import get_risk_score
 
 SECRET_PATTERNS = {
     "AWS Secret Access Key": re.compile(r"\b(?:AKIA|ASIA|AGPA|AIDA|ANPA|AROA|AIPA|ANVA)[0-9A-Z]{16}\b"),
@@ -101,6 +102,7 @@ def scan_text(content: str, source: str) -> List[Dict[str, object]]:
         for name, pattern in SECRET_PATTERNS.items():
             for match in pattern.finditer(line):
                 value = match.group(1) if match.groups() else match.group(0)
+                severity = get_risk_score(name)
                 issues.append(
                     {
                         "source": source,
@@ -110,6 +112,7 @@ def scan_text(content: str, source: str) -> List[Dict[str, object]]:
                         "snippet": line.strip(),
                         "confidence": "high",
                         "reason": "pattern",
+                        "severity": severity.name,
                     }
                 )
         for match in SECRET_STRING_PATTERN.finditer(line):
@@ -120,6 +123,7 @@ def scan_text(content: str, source: str) -> List[Dict[str, object]]:
                 continue
             entropy = shannon_entropy(value)
             if entropy >= ENTROPY_THRESHOLD:
+                severity = get_risk_score("High entropy string")
                 issues.append(
                     {
                         "source": source,
@@ -130,6 +134,7 @@ def scan_text(content: str, source: str) -> List[Dict[str, object]]:
                         "confidence": "medium",
                         "reason": "entropy",
                         "entropy": round(entropy, 2),
+                        "severity": severity.name,
                     }
                 )
     return issues
