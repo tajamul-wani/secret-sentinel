@@ -2,15 +2,46 @@
   "version": "2.0.0",
   "tasks": [
     {
+      "label": "Secret Sentinel: Run Tests",
+      "type": "shell",
+      "command": "python3",
+      "args": [
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tests",
+        "-p",
+        "test_*.py"
+      ],
+      "group": {
+        "kind": "test",
+        "isDefault": true
+      },
+      "problemMatcher": []
+    },
+    {
       "label": "Secret Sentinel: Scan Staged",
       "type": "shell",
-      "command": "powershell",
+      "command": "python3",
       "args": [
-        "-ExecutionPolicy",
-        "Bypass",
-        "-File",
-        "${workspaceFolder}/run_secret_sentinel.ps1",
+        "-m",
+        "secret_sentinel.cli",
         "--staged"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Secret Sentinel: Scan Repository",
+      "type": "shell",
+      "command": "python3",
+      "args": [
+        "-m",
+        "secret_sentinel.cli",
+        "."
       ],
       "options": {
         "cwd": "${workspaceFolder}"
@@ -20,12 +51,10 @@
     {
       "label": "Secret Sentinel: Install Hook",
       "type": "shell",
-      "command": "powershell",
+      "command": "python3",
       "args": [
-        "-ExecutionPolicy",
-        "Bypass",
-        "-File",
-        "${workspaceFolder}/run_secret_sentinel.ps1",
+        "-m",
+        "secret_sentinel.cli",
         "--install-hook"
       ],
       "options": {
@@ -36,12 +65,10 @@
     {
       "label": "Secret Sentinel: Uninstall Hook",
       "type": "shell",
-      "command": "powershell",
+      "command": "python3",
       "args": [
-        "-ExecutionPolicy",
-        "Bypass",
-        "-File",
-        "${workspaceFolder}/run_secret_sentinel.ps1",
+        "-m",
+        "secret_sentinel.cli",
         "--uninstall-hook"
       ],
       "options": {
