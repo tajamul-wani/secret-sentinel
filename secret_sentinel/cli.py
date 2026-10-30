@@ -1,24 +1,52 @@
+"""Command-line interface for Secret Sentinel."""
+
 import argparse
+import logging
 import os
 import sys
 from pathlib import Path
-from typing import List, Dict, Optional
+from typing import Any, Dict, List, Optional
 
+from .ai_validator import validate_issues
 from .config import SecretSentinelConfig
+from .history import ScanHistory
+from .risk_scoring import calculate_overall_severity
 from .scanner import (
-    scan_paths as scan_disk_paths,
-    scan_staged_files,
     get_git_root,
     get_staged_content,
     get_staged_paths,
+    scan_paths as scan_disk_paths,
+    scan_staged_files,
     summarize_issues,
 )
-from .ai_validator import validate_issues
-from .history import ScanHistory
-from .risk_scoring import calculate_overall_severity
+
+logger = logging.getLogger("secret_sentinel")
 
 
-def parse_args() -> argparse.Namespace:
+def setup_logging(debug: bool = False) -> None:
+    """Configure logging format and level.
+
+    Args:
+        debug: Whether debug mode is enabled.
+    """
+    level = logging.DEBUG if debug else logging.INFO
+    formatter = logging.Formatter("%(levelname)s: %(message)s" if debug else "%(message)s")
+    handler = logging.StreamHandler(sys.stdout if not debug else sys.stderr)
+    handler.setFormatter(formatter)
+    handler.setLevel(level)
+
+    logger.handlers.clear()
+    logger.addHandler(handler)
+    logger.setLevel(level)
+    logger.propagate = False
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """Create the command-line argument parser.
+
+    Returns:
+        Configured ArgumentParser instance.
+    """
     parser = argparse.ArgumentParser(
         prog="secret-sentinel",
         description="Local AI-assisted secret scanner for Git pre-commit hooks.",
@@ -26,7 +54,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "paths",
         nargs="*",
-        help="Paths to scan. If omitted and --staged is not set, scans staged files in the current Git repo.",
+        help="Paths to scan. If omitted and --staged is not set, scans staged files in current Git repo.",
     )
     parser.add_argument(
         "--staged",
@@ -79,26 +107,56 @@ def parse_args() -> argparse.Namespace:
         action="version",
         version="secret-sentinel 0.1.0",
     )
-    return parser.parse_args()
+    return parser
+
+
+def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
+    """Parse command line arguments.
+
+    Args:
+        argv: Optional list of CLI argument strings. Uses sys.argv[1:] if None.
+
+    Returns:
+        Parsed Namespace object.
+    """
+    parser = build_parser()
+    return parser.parse_args(argv)
+
+
+def parse_args_from(argv: List[str]) -> argparse.Namespace:
+    """Parse arguments from a specified list.
+
+    Args:
+        argv: List of arguments.
+
+    Returns:
+        Parsed Namespace object.
+    """
+    return parse_args(argv)
 
 
 def install_git_hook(repo_root: str) -> None:
+    """Install the Git pre-commit hook in the repository.
+
+    Args:
+        repo_root: Root path of the Git repository.
+    """
     try:
         hook_dir = os.path.join(repo_root, ".git", "hooks")
         if not os.path.isdir(hook_dir):
             raise FileNotFoundError("No .git/hooks directory found in repository root.")
         hook_path = os.path.join(hook_dir, "pre-commit")
         hook_contents = """#!/usr/bin/env python3
-import os
 import sys
 from pathlib import Path
 
-repo_root = Path(__file__).resolve().parent.parent
+# Resolve repository root from .git/hooks/pre-commit
+repo_root = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(repo_root))
 
 from secret_sentinel.cli import main
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     sys.exit(main(["--no-ai", "--staged"]))
 """
         with open(hook_path, "w", encoding="utf-8") as handle:
@@ -106,11 +164,16 @@ if __name__ == '__main__':
         os.chmod(hook_path, 0o755)
         print(f"Installed pre-commit hook at {hook_path}")
     except Exception as exc:
-        print(f"Failed to install Git hook: {exc}", file=sys.stderr)
+        logger.error("Failed to install Git hook: %s", exc)
         sys.exit(1)
 
 
 def uninstall_git_hook(repo_root: str) -> None:
+    """Remove the Git pre-commit hook if present.
+
+    Args:
+        repo_root: Root path of the Git repository.
+    """
     try:
         hook_path = os.path.join(repo_root, ".git", "hooks", "pre-commit")
         if os.path.exists(hook_path):
@@ -119,62 +182,97 @@ def uninstall_git_hook(repo_root: str) -> None:
         else:
             print("No pre-commit hook found to remove.")
     except Exception as exc:
-        print(f"Failed to remove Git hook: {exc}", file=sys.stderr)
+        logger.error("Failed to remove Git hook: %s", exc)
         sys.exit(1)
 
 
-def scan_paths(paths: List[str], no_ai: bool, staged: bool, debug: bool = False) -> List[Dict[str, object]]:
+def scan_paths(
+    paths: List[str],
+    no_ai: bool,
+    staged: bool,
+    debug: bool = False,
+) -> List[Dict[str, Any]]:
+    """Execute secret scan across paths or staged changes, optionally applying AI validation.
+
+    Args:
+        paths: Target paths to scan.
+        no_ai: Whether to skip AI validation.
+        staged: Whether to scan git staged changes.
+        debug: Whether debug mode is active.
+
+    Returns:
+        List of verified issue findings.
+    """
     repo_root = get_git_root() or os.getcwd()
     config = SecretSentinelConfig.load(repo_root)
     ignore_globs = config.ignore_globs
+
     if debug:
-        print(f"repo_root={repo_root}")
-        print(f"ignore_globs={ignore_globs}")
-        print(f"ai_enabled={config.ai_enabled}")
-    issues = []
+        logger.debug("repo_root=%s", repo_root)
+        logger.debug("ignore_globs=%s", ignore_globs)
+        logger.debug("ai_enabled=%s", config.ai_enabled)
+
+    issues: List[Dict[str, Any]] = []
     if staged or not paths:
         issues = scan_staged_files(ignore_globs=ignore_globs, repo_root=repo_root)
     else:
         issues = scan_disk_paths(paths, ignore_globs=ignore_globs, repo_root=repo_root)
-    if no_ai or not config.ai_enabled:
+
+    if no_ai or not config.ai_enabled or not issues:
         return issues
-    verified = []
-    for path in paths if paths else get_staged_paths():
-        content = None
-        if not paths:
-            content = get_staged_content(path)
+
+    issues_by_source: Dict[str, List[Dict[str, Any]]] = {}
+    for issue in issues:
+        issues_by_source.setdefault(str(issue["source"]), []).append(issue)
+
+    verified: List[Dict[str, Any]] = []
+    for source_path, path_issues in issues_by_source.items():
+        content: Optional[str] = None
+        if staged or not paths:
+            content = get_staged_content(source_path)
         if content is None:
+            disk_path = Path(repo_root) / source_path if not os.path.isabs(source_path) else Path(source_path)
             try:
-                with open(path, "r", encoding="utf-8", errors="replace") as handle:
-                    content = handle.read()
+                if disk_path.is_file():
+                    with open(disk_path, "r", encoding="utf-8", errors="replace") as handle:
+                        content = handle.read()
             except OSError:
-                continue
+                pass
         if content is None:
+            verified.extend(path_issues)
             continue
-        path_issues = [issue for issue in issues if issue["source"] == path]
-        verified.extend(validate_issues(path_issues, path, content))
+        verified.extend(validate_issues(path_issues, source_path, content))
+
     return verified
 
 
-def main(argv=None) -> int:
-    args = parse_args() if argv is None else parse_args_from(argv)
+def main(argv: Optional[List[str]] = None) -> int:
+    """Main CLI entry point for Secret Sentinel.
+
+    Args:
+        argv: Optional command-line arguments.
+
+    Returns:
+        Exit code: 0 for success/no secrets, 1 when secrets are detected or on error.
+    """
+    args = parse_args(argv)
+    setup_logging(debug=args.debug)
     repo_root = get_git_root() or os.getcwd()
-    
-    # Handle history and stats commands
+
     if args.history or args.stats or args.clear_history:
         history_manager = ScanHistory(repo_root)
-        
+
         if args.clear_history:
             history_manager.clear_history()
             print("Scan history cleared.")
             return 0
-        
+
         if args.history:
             history_records = history_manager.get_history(limit=args.history_limit)
             if not history_records:
                 print("No scan history found.")
                 return 0
-            
+
             print("=" * 80)
             print("SCAN HISTORY (latest first)")
             print("=" * 80)
@@ -183,122 +281,62 @@ def main(argv=None) -> int:
                 print(f"    Type: {record['scan_type']}")
                 print(f"    Status: {record['status']}")
                 print(f"    Total issues: {record['total_issues']}")
-                severity = record.get('severity_counts', {})
+                severity = record.get("severity_counts", {})
                 if severity:
-                    print(f"    Severity breakdown:")
+                    print("    Severity breakdown:")
                     for level, count in severity.items():
                         if count > 0:
                             print(f"      {level}: {count}")
             return 0
-        
+
         if args.stats:
             stats = history_manager.get_statistics()
-            if stats['total_scans'] == 0:
+            if stats["total_scans"] == 0:
                 print("No scan statistics available.")
                 return 0
-            
+
             print("=" * 80)
             print("SCAN STATISTICS")
             print("=" * 80)
             print(f"Total scans: {stats['total_scans']}")
             print(f"Total issues found: {stats['total_issues_found']}")
             print("\nSeverity summary:")
-            for level, count in stats['severity_summary'].items():
+            for level, count in stats["severity_summary"].items():
                 if count > 0:
                     print(f"  {level}: {count}")
             print("\nScans by type:")
-            for scan_type, count in stats['scan_types'].items():
+            for scan_type, count in stats["scan_types"].items():
                 print(f"  {scan_type}: {count}")
-            
-            if stats['latest_scan']:
-                latest = stats['latest_scan']
+
+            if stats["latest_scan"]:
+                latest = stats["latest_scan"]
                 print(f"\nLatest scan: {latest['timestamp']}")
             return 0
-    
+
     if args.install_hook:
         install_git_hook(repo_root)
         return 0
     if args.uninstall_hook:
         uninstall_git_hook(repo_root)
         return 0
-    
+
     issues = scan_paths(args.paths, args.no_ai, staged=args.staged, debug=args.debug)
-    
-    # Record scan in history
+
     history_manager = ScanHistory(repo_root)
     scan_type = "staged" if args.staged else "manual"
     status = "blocked" if issues else "completed"
     history_manager.record_scan(issues, scan_type=scan_type, status=status)
-    
+
     if issues:
         print(summarize_issues(issues))
         overall_severity = calculate_overall_severity(issues)
         print(f"Overall severity: {overall_severity}")
         print("Commit blocked: secret-sentinel detected potential hardcoded secrets.")
         return 1
+
     print("secret-sentinel scan passed.")
     return 0
 
 
-def parse_args_from(argv: List[str]) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        prog="secret-sentinel",
-        description="Local AI-assisted secret scanner for Git pre-commit hooks.",
-    )
-    parser.add_argument(
-        "paths",
-        nargs="*",
-        help="Paths to scan. If omitted and --staged is not set, scans staged files in the current Git repo.",
-    )
-    parser.add_argument(
-        "--staged",
-        action="store_true",
-        help="Scan staged Git files instead of disk paths.",
-    )
-    parser.add_argument(
-        "--no-ai",
-        action="store_true",
-        help="Skip AI context validation and rely on local regex/entropy scanning only.",
-    )
-    parser.add_argument(
-        "--install-hook",
-        action="store_true",
-        help="Install secret-sentinel as a Git pre-commit hook in the current repository.",
-    )
-    parser.add_argument(
-        "--uninstall-hook",
-        action="store_true",
-        help="Remove the secret-sentinel Git pre-commit hook if installed.",
-    )
-    parser.add_argument(
-        "--debug",
-        action="store_true",
-        help="Print debug information during scanning.",
-    )
-    parser.add_argument(
-        "--history",
-        action="store_true",
-        help="Show scan history.",
-    )
-    parser.add_argument(
-        "--stats",
-        action="store_true",
-        help="Show scan statistics.",
-    )
-    parser.add_argument(
-        "--history-limit",
-        type=int,
-        default=10,
-        help="Number of history records to show (default: 10).",
-    )
-    parser.add_argument(
-        "--clear-history",
-        action="store_true",
-        help="Clear all scan history.",
-    )
-    parser.add_argument(
-        "--version",
-        action="version",
-        version="secret-sentinel 0.1.0",
-    )
-    return parser.parse_args(argv)
+if __name__ == "__main__":
+    sys.exit(main())
