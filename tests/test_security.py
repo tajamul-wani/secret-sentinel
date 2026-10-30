@@ -8,6 +8,7 @@ import json
 import tempfile
 import unittest
 
+from secret_sentinel.formatters import format_json, format_sarif
 from secret_sentinel.history import ScanHistory
 from secret_sentinel.scanner import scan_text, summarize_issues
 from secret_sentinel.utils import mask_secret, sanitize_snippet
@@ -19,6 +20,12 @@ DUMMY_STRIPE = "pk_test_" + "123456789012345678901234"
 DUMMY_GITHUB = "ghp_" + "123456789012345678901234567890123456"
 DUMMY_SLACK = "xoxb-" + "1234567890-" + "abcdefghij"
 DUMMY_TWILIO = "SK" + "1234567890abcdef" + "1234567890abcdef"
+DUMMY_OPENAI = "sk-proj-" + "1234567890abcdefghijklmnopqrstuvwxyz123456"
+DUMMY_ANTHROPIC = "sk-ant-" + "1234567890abcdefghijklmnopqrstuvwxyz123456"
+DUMMY_HUGGINGFACE = "hf_" + "1234567890abcdefghijklmnopqrstuvwx"
+DUMMY_PYPI = "pypi-AgEIcHlwaS5vcmc" + "1234567890abcdefghijklmnopqrstuvwxyz1234567890abcdef"
+DUMMY_NPM = "npm_" + "1234567890abcdefghijklmnopqrstuvwxyz"
+DUMMY_DB_URI = "postgresql://admin:" + "superSecretPass123" + "@db.example.com:5432/mydb"
 
 
 class TestSecurityAndLeakPrevention(unittest.TestCase):
@@ -33,6 +40,12 @@ class TestSecurityAndLeakPrevention(unittest.TestCase):
             (DUMMY_GITHUB, "GitHub Token"),
             (DUMMY_SLACK, "Slack Token"),
             (DUMMY_TWILIO, "Twilio Secret Key"),
+            (DUMMY_OPENAI, "OpenAI API Key"),
+            (DUMMY_ANTHROPIC, "Anthropic API Key"),
+            (DUMMY_HUGGINGFACE, "HuggingFace Token"),
+            (DUMMY_PYPI, "PyPI API Token"),
+            (DUMMY_NPM, "NPM Access Token"),
+            (DUMMY_DB_URI, "Database Connection URI"),
         ]
 
         for secret, expected_matcher in secrets_to_test:
@@ -41,13 +54,27 @@ class TestSecurityAndLeakPrevention(unittest.TestCase):
             self.assertTrue(len(issues) >= 1)
 
             summary = summarize_issues(issues)
-            # The raw secret string MUST NOT be in the summary
             self.assertNotIn(
                 secret,
                 summary,
-                f"Security failure: Raw secret {secret} leaked in summary output!",
+                f"Security failure: Raw secret leaked in summary: {expected_matcher}",
             )
-            # The summary must contain the redacted placeholder
+            self.assertIn("[REDACTED]", summary)
+
+            # Verify JSON and SARIF also never leak the raw secret
+            json_report = format_json(issues)
+            self.assertNotIn(
+                secret,
+                json_report,
+                f"Security failure: Raw secret leaked in JSON report: {expected_matcher}",
+            )
+
+            sarif_report = format_sarif(issues)
+            self.assertNotIn(
+                secret,
+                sarif_report,
+                f"Security failure: Raw secret leaked in SARIF report: {expected_matcher}",
+            )
             self.assertIn("[REDACTED]", summary)
 
     def test_scan_history_never_records_secret_values(self) -> None:

@@ -18,10 +18,23 @@ SECRET_PATTERNS = {
     "Slack Token": re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{10,}\b"),
     "JWT": re.compile(r"\beyJ[0-9A-Za-z_\-]+\.[0-9A-Za-z_\-]+\.[0-9A-Za-z_\-]+\b"),
     "Twilio Secret Key": re.compile(r"\bSK[0-9a-fA-F]{32}\b"),
+    "Private Key": re.compile(r"-----BEGIN (?:[A-Z0-9_-]+\s)?PRIVATE KEY-----"),
+    "Database Connection URI": re.compile(r"(?i)\b(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis|amqp[s]?):\/\/[^\s:]+:([^\s@]+)@[^\s/:]+"),
+    "OpenAI API Key": re.compile(r"\bsk-(?:proj-|svcacct-|admin-)?[A-Za-z0-9_-]{32,}\b"),
+    "Anthropic API Key": re.compile(r"\bsk-ant-[A-Za-z0-9_-]{32,}\b"),
+    "HuggingFace Token": re.compile(r"\bhf_[A-Za-z0-9]{34}\b"),
+    "PyPI API Token": re.compile(r"\bpypi-AgEIcHlwaS5vcmc[A-Za-z0-9_-]{50,}\b"),
+    "NPM Access Token": re.compile(r"\bnpm_[A-Za-z0-9]{36}\b"),
     "Generic Secret Assignment": re.compile(
         r"(?i)\b(?:api[_\-]?key|secret|token|password|passwd|auth|credential|client_secret|private_key|oauth[_\-]?token)\b\s*[:=]\s*[\"']?([A-Za-z0-9_\-+\/=]{16,})[\"']?"
     ),
 }
+IGNORE_DIRECTIVE_PATTERN = re.compile(
+    r"(?i)(?:#|\/\/|\/\*)\s*secret[-_]?sentinel:\s*ignore\b"
+)
+IGNORE_NEXT_LINE_PATTERN = re.compile(
+    r"(?i)(?:#|\/\/|\/\*)\s*secret[-_]?sentinel:\s*disable[-_]next[-_]line\b"
+)
 SECRET_STRING_PATTERN = re.compile(r"[\"']([A-Za-z0-9+/=_.-]{24,})[\"']")
 ENTROPY_THRESHOLD = 4.6
 MIN_ENTROPY_LENGTH = 24
@@ -182,6 +195,9 @@ def _line_has_secret_keyword(line: str) -> bool:
 def scan_text(content: str, source: str) -> List[Dict[str, Any]]:
     """Scan string content for known secret patterns and high-entropy strings.
 
+    Supports inline suppression via `# secret-sentinel: ignore` and
+    `# secret-sentinel: disable-next-line`.
+
     Args:
         content: The text content to analyze.
         source: Source identifier (e.g. file path).
@@ -191,7 +207,20 @@ def scan_text(content: str, source: str) -> List[Dict[str, Any]]:
     """
     issues = []
     lines = content.splitlines()
+    skip_next_line = False
+
     for lineno, line in enumerate(lines, start=1):
+        if skip_next_line:
+            skip_next_line = False
+            continue
+
+        if IGNORE_NEXT_LINE_PATTERN.search(line):
+            skip_next_line = True
+            continue
+
+        if IGNORE_DIRECTIVE_PATTERN.search(line):
+            continue
+
         for name, pattern in SECRET_PATTERNS.items():
             for match in pattern.finditer(line):
                 value = match.group(1) if match.groups() else match.group(0)

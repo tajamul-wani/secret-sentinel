@@ -27,6 +27,13 @@ DUMMY_GITHUB = "ghp_" + "123456789012345678901234567890123456"
 DUMMY_SLACK = "xoxb-" + "1234567890-abcdefghij"
 DUMMY_JWT = "eyJ" + "hbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.doNotLeakThisSignature123"
 DUMMY_TWILIO = "SK" + "1234567890abcdef" + "1234567890abcdef"
+DUMMY_OPENAI = "sk-proj-" + "1234567890abcdefghijklmnopqrstuvwxyz123456"
+DUMMY_ANTHROPIC = "sk-ant-" + "1234567890abcdefghijklmnopqrstuvwxyz123456"
+DUMMY_HUGGINGFACE = "hf_" + "1234567890abcdefghijklmnopqrstuvwx"
+DUMMY_PYPI = "pypi-AgEIcHlwaS5vcmc" + "1234567890abcdefghijklmnopqrstuvwxyz1234567890abcdef"
+DUMMY_NPM = "npm_" + "1234567890abcdefghijklmnopqrstuvwxyz"
+DUMMY_PRIVATE_KEY = "-----BEGIN " + "RSA " + "PRIVATE KEY-----"
+DUMMY_DB_URI = "postgresql://admin:" + "superSecretPass123" + "@db.example.com:5432/mydb"
 
 
 class TestScanner(unittest.TestCase):
@@ -73,6 +80,71 @@ class TestScanner(unittest.TestCase):
         content = f'twilio = "{DUMMY_TWILIO}"\n'
         issues = scan_text(content, "sms.py")
         self.assertTrue(any(i["matcher"] == "Twilio Secret Key" for i in issues))
+
+    def test_scan_text_detects_private_key(self) -> None:
+        """Detect private key headers."""
+        content = f'{DUMMY_PRIVATE_KEY}\nMIIEowIBAAKCAQEA0...\n'
+        issues = scan_text(content, "id_rsa")
+        self.assertTrue(any(i["matcher"] == "Private Key" for i in issues))
+
+    def test_scan_text_detects_database_uri(self) -> None:
+        """Detect database connection URIs with embedded passwords."""
+        content = f'DATABASE_URL = "{DUMMY_DB_URI}"\n'
+        issues = scan_text(content, "env.py")
+        self.assertTrue(any(i["matcher"] == "Database Connection URI" for i in issues))
+
+    def test_scan_text_detects_openai_key(self) -> None:
+        """Detect OpenAI API keys."""
+        content = f'OPENAI_API_KEY = "{DUMMY_OPENAI}"\n'
+        issues = scan_text(content, "ai.py")
+        self.assertTrue(any(i["matcher"] == "OpenAI API Key" for i in issues))
+
+    def test_scan_text_detects_anthropic_key(self) -> None:
+        """Detect Anthropic API keys."""
+        content = f'ANTHROPIC_KEY = "{DUMMY_ANTHROPIC}"\n'
+        issues = scan_text(content, "claude.py")
+        self.assertTrue(any(i["matcher"] == "Anthropic API Key" for i in issues))
+
+    def test_scan_text_detects_huggingface_token(self) -> None:
+        """Detect HuggingFace access tokens."""
+        content = f'HF_TOKEN = "{DUMMY_HUGGINGFACE}"\n'
+        issues = scan_text(content, "model.py")
+        self.assertTrue(any(i["matcher"] == "HuggingFace Token" for i in issues))
+
+    def test_scan_text_detects_pypi_token(self) -> None:
+        """Detect PyPI API tokens."""
+        content = f'PYPI_TOKEN = "{DUMMY_PYPI}"\n'
+        issues = scan_text(content, "publish.py")
+        self.assertTrue(any(i["matcher"] == "PyPI API Token" for i in issues))
+
+    def test_scan_text_detects_npm_token(self) -> None:
+        """Detect NPM access tokens."""
+        content = f'NPM_TOKEN = "{DUMMY_NPM}"\n'
+        issues = scan_text(content, "package.py")
+        self.assertTrue(any(i["matcher"] == "NPM Access Token" for i in issues))
+
+    def test_scan_text_inline_ignore_hash(self) -> None:
+        """Inline # secret-sentinel: ignore should suppress the finding."""
+        content = f'aws_key = "{DUMMY_AWS}"  # secret-sentinel: ignore\n'
+        issues = scan_text(content, "test.py")
+        self.assertEqual(len(issues), 0)
+
+    def test_scan_text_inline_ignore_c_style(self) -> None:
+        """Inline // secret-sentinel: ignore should suppress the finding."""
+        content = f'const key = "{DUMMY_AWS}"; // secret-sentinel: ignore\n'
+        issues = scan_text(content, "test.js")
+        self.assertEqual(len(issues), 0)
+
+    def test_scan_text_disable_next_line(self) -> None:
+        """Directive # secret-sentinel: disable-next-line should suppress only next line."""
+        content = (
+            f'# secret-sentinel: disable-next-line\n'
+            f'aws_key1 = "{DUMMY_AWS}"\n'
+            f'aws_key2 = "{DUMMY_AWS}"\n'
+        )
+        issues = scan_text(content, "test.py")
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(issues[0]["line"], 3)
 
     def test_scan_text_detects_generic_secret(self) -> None:
         """Detect generic secret assignments."""
