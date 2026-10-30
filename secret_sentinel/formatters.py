@@ -7,11 +7,15 @@ from .risk_scoring import SeverityLevel, calculate_overall_severity
 from .utils import sanitize_snippet
 
 
-def format_text(issues: List[Dict[str, Any]]) -> str:
+def format_text(
+    issues: List[Dict[str, Any]],
+    fail_on: Optional[SeverityLevel] = None,
+) -> str:
     """Format scan issues into human-readable text.
 
     Args:
         issues: List of detected issues.
+        fail_on: Optional minimum severity level required to block.
 
     Returns:
         Formatted summary string.
@@ -31,22 +35,41 @@ def format_text(issues: List[Dict[str, Any]]) -> str:
 
     overall_severity = calculate_overall_severity(issues)
     lines.append(f"Overall severity: {overall_severity}")
-    lines.append("Commit blocked: secret-sentinel detected potential hardcoded secrets.")
+
+    threshold = fail_on or SeverityLevel.LOW
+    if overall_severity.value >= threshold.value:
+        lines.append("Commit blocked: secret-sentinel detected potential hardcoded secrets.")
+    else:
+        lines.append(
+            f"Scan passed with warnings: detected issues are below failure threshold ({threshold.name})."
+        )
     return "\n".join(lines)
 
 
-def format_json(issues: List[Dict[str, Any]]) -> str:
+def format_json(
+    issues: List[Dict[str, Any]],
+    fail_on: Optional[SeverityLevel] = None,
+) -> str:
     """Format scan issues into machine-readable JSON without leaking credentials.
 
     Args:
         issues: List of detected issues.
+        fail_on: Optional minimum severity level required to block.
 
     Returns:
         Indented JSON string.
     """
     overall_severity = calculate_overall_severity(issues)
-    sanitized_issues: List[Dict[str, Any]] = []
+    threshold = fail_on or SeverityLevel.LOW
 
+    if not issues:
+        status = "passed"
+    elif overall_severity.value >= threshold.value:
+        status = "blocked"
+    else:
+        status = "warning"
+
+    sanitized_issues: List[Dict[str, Any]] = []
     for issue in issues:
         raw_snippet = str(issue.get("snippet", ""))
         secret_val = str(issue.get("value", ""))
@@ -65,9 +88,10 @@ def format_json(issues: List[Dict[str, Any]]) -> str:
         sanitized_issues.append(item)
 
     report = {
-        "status": "blocked" if issues else "passed",
+        "status": status,
         "total_issues": len(issues),
         "overall_severity": overall_severity.name,
+        "fail_on": threshold.name,
         "issues": sanitized_issues,
     }
     return json.dumps(report, indent=2)
@@ -146,4 +170,3 @@ def format_sarif(issues: List[Dict[str, Any]], repo_root: Optional[str] = None) 
         ]
     }
     return json.dumps(sarif_log, indent=2)
-
