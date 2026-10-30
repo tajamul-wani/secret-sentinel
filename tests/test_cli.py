@@ -178,6 +178,27 @@ class TestCLI(unittest.TestCase):
                     issues = cli_scan_paths([secret_file], no_ai=False, staged=False, debug=False)
                     self.assertEqual(issues, [])
 
+    def test_main_format_json(self) -> None:
+        """Main with --format json should return exit code 0 when clean."""
+        with patch("secret_sentinel.cli.scan_paths", return_value=[]):
+            with patch("secret_sentinel.cli.get_git_root", return_value=None):
+                self.assertEqual(main(["--format", "json", "--no-ai"]), 0)
+
+    def test_main_format_sarif(self) -> None:
+        """Main with --format sarif should return exit code 0 when clean."""
+        with patch("secret_sentinel.cli.scan_paths", return_value=[]):
+            with patch("secret_sentinel.cli.get_git_root", return_value=None):
+                self.assertEqual(main(["--format", "sarif", "--no-ai"]), 0)
+
+    def test_main_output_to_file(self) -> None:
+        """Main with --output should write report to target file."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_file = os.path.join(tmpdir, "report.json")
+            with patch("secret_sentinel.cli.scan_paths", return_value=[]):
+                with patch("secret_sentinel.cli.get_git_root", return_value=None):
+                    self.assertEqual(main(["--format", "json", "--output", output_file]), 0)
+            self.assertTrue(os.path.exists(output_file))
+
 
 if __name__ == "__main__":
     unittest.main()

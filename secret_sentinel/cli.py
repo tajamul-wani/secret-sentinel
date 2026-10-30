@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional
 
 from .ai_validator import validate_issues
 from .config import SecretSentinelConfig
+from .formatters import format_json, format_sarif, format_text
 from .history import ScanHistory
 from .risk_scoring import calculate_overall_severity
 from .scanner import (
@@ -101,6 +102,18 @@ def build_parser() -> argparse.ArgumentParser:
         "--clear-history",
         action="store_true",
         help="Clear all scan history.",
+    )
+    parser.add_argument(
+        "--format",
+        choices=["text", "json", "sarif"],
+        default="text",
+        help="Output format: text, json, or sarif (default: text).",
+    )
+    parser.add_argument(
+        "--output",
+        type=str,
+        default=None,
+        help="Write findings report to specified file instead of stdout.",
     )
     parser.add_argument(
         "--version",
@@ -327,15 +340,24 @@ def main(argv: Optional[List[str]] = None) -> int:
     status = "blocked" if issues else "completed"
     history_manager.record_scan(issues, scan_type=scan_type, status=status)
 
-    if issues:
-        print(summarize_issues(issues))
-        overall_severity = calculate_overall_severity(issues)
-        print(f"Overall severity: {overall_severity}")
-        print("Commit blocked: secret-sentinel detected potential hardcoded secrets.")
-        return 1
+    if args.format == "json":
+        output_str = format_json(issues)
+    elif args.format == "sarif":
+        output_str = format_sarif(issues, repo_root=repo_root)
+    else:
+        output_str = format_text(issues)
 
-    print("secret-sentinel scan passed.")
-    return 0
+    if args.output:
+        try:
+            with open(args.output, "w", encoding="utf-8") as handle:
+                handle.write(output_str + "\n")
+        except OSError as exc:
+            logger.error("Failed to write output file: %s", exc)
+            return 1
+    else:
+        print(output_str)
+
+    return 1 if issues else 0
 
 
 if __name__ == "__main__":

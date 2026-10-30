@@ -52,12 +52,54 @@ secret-sentinel --staged --no-ai
 
 Each detected secret is assigned a severity level based on its type:
 
-- **CRITICAL**: AWS keys, API tokens (Stripe, GitHub, Slack, Google), Twilio keys
+- **CRITICAL**: AWS keys, API tokens (Stripe, GitHub, Slack, Google), Twilio keys, Private keys, Database connection URIs, OpenAI / Anthropic / HuggingFace / PyPI / NPM tokens
 - **HIGH**: JWT tokens, generic secret assignments
 - **MEDIUM**: High-entropy strings detected via pattern matching
 - **LOW**: Other potential secrets
 
 The overall severity of a scan is determined by the highest severity issue found.
+
+### Output Formats
+
+Export scan results in different formats for terminal view, script parsing, or CI/CD integration:
+
+```bash
+# Standard terminal output (default)
+secret-sentinel . --format text
+
+# Machine-readable JSON output
+secret-sentinel . --format json
+
+# SARIF v2.1.0 output for GitHub Code Scanning
+secret-sentinel . --format sarif --output results.sarif
+```
+
+### Inline Ignore Directives
+
+Suppress false positives or intentional test fixtures directly in source code:
+
+```python
+# Ignore finding on the current line
+api_key = "dummy_mock_key"  # secret-sentinel: ignore
+
+# Ignore finding on the subsequent line
+# secret-sentinel: disable-next-line
+api_key = "dummy_mock_key"
+```
+
+C-style comments (`// secret-sentinel: ignore` or `/* secret-sentinel: ignore */`) are also supported.
+
+### Using with the `pre-commit` Framework
+
+You can add Secret Sentinel to your project's `.pre-commit-config.yaml`:
+
+```yaml
+repos:
+  - repo: https://github.com/tajamul-wani/secret-sentinel
+    rev: main
+    hooks:
+      - id: secret-sentinel
+```
 
 ### History and Statistics
 
