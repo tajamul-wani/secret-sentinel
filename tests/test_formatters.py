@@ -4,6 +4,7 @@ import json
 import unittest
 
 from secret_sentinel.formatters import format_json, format_sarif, format_text
+from secret_sentinel.risk_scoring import SeverityLevel
 
 DUMMY_AWS = "AKIA" + "1234567890ABCDEF"
 
@@ -37,6 +38,33 @@ class TestFormatters(unittest.TestCase):
         self.assertIn("[REDACTED]", result)
         self.assertNotIn(DUMMY_AWS, result)
         self.assertIn("CRITICAL", result)
+
+    def test_format_text_below_fail_on(self) -> None:
+        """Text format below fail_on threshold should indicate warnings allowed."""
+        medium_issue = [{
+            "source": "app.py",
+            "line": 1,
+            "matcher": "High entropy string",
+            "value": "randomStr1234567890",
+            "snippet": 'x = "randomStr1234567890"',
+            "severity": "MEDIUM",
+        }]
+        result = format_text(medium_issue, fail_on=SeverityLevel.HIGH)
+        self.assertIn("below failure threshold", result)
+        self.assertNotIn("Commit blocked", result)
+
+    def test_format_json_below_fail_on(self) -> None:
+        """JSON format below fail_on threshold should set status to warning."""
+        medium_issue = [{
+            "source": "app.py",
+            "line": 1,
+            "matcher": "High entropy string",
+            "value": "randomStr1234567890",
+            "snippet": 'x = "randomStr1234567890"',
+            "severity": "MEDIUM",
+        }]
+        data = json.loads(format_json(medium_issue, fail_on=SeverityLevel.HIGH))
+        self.assertEqual(data["status"], "warning")
 
     def test_format_json_clean(self) -> None:
         """JSON format with no issues should return passed status."""

@@ -199,6 +199,40 @@ class TestCLI(unittest.TestCase):
                     self.assertEqual(main(["--format", "json", "--output", output_file]), 0)
             self.assertTrue(os.path.exists(output_file))
 
+    def test_main_fail_on_threshold_allows(self) -> None:
+        """Issues below the fail-on threshold should not block commit (exit code 0)."""
+        mock_medium_issue = [
+            {
+                "source": "app.py",
+                "line": 5,
+                "matcher": "High entropy string",
+                "value": "randomEntropyString123456",
+                "snippet": 'entropy = "randomEntropyString123456"',
+                "confidence": "medium",
+                "severity": "MEDIUM",
+            }
+        ]
+        with patch("secret_sentinel.cli.scan_paths", return_value=mock_medium_issue):
+            with patch("secret_sentinel.cli.get_git_root", return_value=None):
+                self.assertEqual(main(["--fail-on", "HIGH", "--no-ai"]), 0)
+
+    def test_main_fail_on_threshold_blocks(self) -> None:
+        """Issues meeting or exceeding fail-on threshold should block commit (exit code 1)."""
+        mock_critical_issue = [
+            {
+                "source": "app.py",
+                "line": 5,
+                "matcher": "AWS Secret Access Key",
+                "value": DUMMY_AWS,
+                "snippet": f'key = "{DUMMY_AWS}"',
+                "confidence": "high",
+                "severity": "CRITICAL",
+            }
+        ]
+        with patch("secret_sentinel.cli.scan_paths", return_value=mock_critical_issue):
+            with patch("secret_sentinel.cli.get_git_root", return_value=None):
+                self.assertEqual(main(["--fail-on", "HIGH", "--no-ai"]), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

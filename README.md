@@ -59,6 +59,18 @@ Each detected secret is assigned a severity level based on its type:
 
 The overall severity of a scan is determined by the highest severity issue found.
 
+### Configurable Failure Threshold
+
+Configure which severity level blocks commits or causes CI to fail:
+
+```bash
+# Block only on HIGH or CRITICAL severity, warning on MEDIUM/LOW
+secret-sentinel --staged --fail-on HIGH
+
+# Default behavior: blocks on any detected issue (LOW or higher)
+secret-sentinel --staged --fail-on LOW
+```
+
 ### Output Formats
 
 Export scan results in different formats for terminal view, script parsing, or CI/CD integration:
@@ -160,9 +172,18 @@ Create a `.secret-sentinel.ini` in the repository root:
 [secret-sentinel]
 ignore_paths = tests/*, docs/*
 ai_enabled = false
+fail_on = HIGH
 ```
 
-This helps exclude known-safe paths or fixtures.
+### Using `.secretignore`
+
+You can also create a `.secretignore` file in your repository root to ignore specific paths or mock data:
+
+```text
+# Exclude test fixture data
+tests/fixtures/*
+mock_data/*.json
+```
 
 ## Safety model
 

@@ -11,7 +11,7 @@ from .ai_validator import validate_issues
 from .config import SecretSentinelConfig
 from .formatters import format_json, format_sarif, format_text
 from .history import ScanHistory
-from .risk_scoring import calculate_overall_severity
+from .risk_scoring import SeverityLevel, calculate_overall_severity
 from .scanner import (
     get_git_root,
     get_staged_content,
@@ -102,6 +102,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--clear-history",
         action="store_true",
         help="Clear all scan history.",
+    )
+    parser.add_argument(
+        "--fail-on",
+        choices=["LOW", "MEDIUM", "HIGH", "CRITICAL"],
+        default=None,
+        help="Minimum severity level required to block commit or exit with code 1 (default: LOW).",
     )
     parser.add_argument(
         "--format",
@@ -333,19 +339,25 @@ def main(argv: Optional[List[str]] = None) -> int:
         uninstall_git_hook(repo_root)
         return 0
 
+    config = SecretSentinelConfig.load(repo_root)
+    threshold = SeverityLevel[args.fail_on.upper()] if args.fail_on else config.fail_on
+
     issues = scan_paths(args.paths, args.no_ai, staged=args.staged, debug=args.debug)
+
+    overall_severity = calculate_overall_severity(issues)
+    should_block = bool(issues and (overall_severity.value >= threshold.value))
 
     history_manager = ScanHistory(repo_root)
     scan_type = "staged" if args.staged else "manual"
-    status = "blocked" if issues else "completed"
+    status = "blocked" if should_block else "completed"
     history_manager.record_scan(issues, scan_type=scan_type, status=status)
 
     if args.format == "json":
-        output_str = format_json(issues)
+        output_str = format_json(issues, fail_on=threshold)
     elif args.format == "sarif":
         output_str = format_sarif(issues, repo_root=repo_root)
     else:
-        output_str = format_text(issues)
+        output_str = format_text(issues, fail_on=threshold)
 
     if args.output:
         try:
@@ -357,7 +369,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     else:
         print(output_str)
 
-    return 1 if issues else 0
+    return 1 if should_block else 0
 
 
 if __name__ == "__main__":
