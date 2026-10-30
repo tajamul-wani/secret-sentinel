@@ -1,0 +1,9 @@
+- id: secret-sentinel
+  name: Secret Sentinel
+  description: Local secret scanner for Git repositories
+  entry: secret-sentinel
+  args: ["--staged", "--no-ai"]
+  language: python
+  types: [text]
+  stages: [pre-commit]
+
