@@ -62,6 +62,57 @@ class TestAIValidator(unittest.TestCase):
         with patch("secret_sentinel.ai_validator._query_ollama", return_value="REAL_SECRET"):
             self.assertTrue(validate_issue(issue, "surrounding code"))
 
+    def test_validate_issue_redacts_value_before_local_validation(self) -> None:
+        """AI prompts should not contain the detected secret value."""
+        issue = {"value": "sensitive_value", "matcher": "test token", "confidence": "high"}
+        with patch("secret_sentinel.ai_validator._query_ollama", return_value="REAL_SECRET") as query:
+            self.assertTrue(validate_issue(issue, "token = sensitive_value"))
+        prompt = query.call_args.args[0]
+        self.assertNotIn("sensitive_value", prompt)
+        self.assertIn("[REDACTED]", prompt)
+
+    def test_validate_issue_redacts_private_key_block(self) -> None:
+        """AI prompts should not contain private key material near its header."""
+        issue = {
+            "value": "-----BEGIN RSA PRIVATE KEY-----",
+            "confidence": "high",
+        }
+        private_key = (
+            "-----BEGIN RSA PRIVATE KEY-----\n"
+            "sensitive_key_material\n"
+            "-----END RSA PRIVATE KEY-----"
+        )
+        with patch("secret_sentinel.ai_validator._query_ollama", return_value="REAL_SECRET") as query:
+            self.assertTrue(validate_issue(issue, private_key))
+        self.assertNotIn("sensitive_key_material", query.call_args.args[0])
+
+    def test_validate_issue_redacts_database_connection_uri(self) -> None:
+        """AI prompts should not contain a detected database connection URI."""
+        issue = {
+            "value": "database_password",
+            "matcher": "Database Connection URI",
+            "confidence": "high",
+        }
+        uri = "postgresql://admin:database_password@internal.example:5432/app"
+        with patch("secret_sentinel.ai_validator._query_ollama", return_value="REAL_SECRET") as query:
+            self.assertTrue(validate_issue(issue, uri))
+        prompt = query.call_args.args[0]
+        self.assertNotIn("database_password", prompt)
+        self.assertNotIn("internal.example", prompt)
+
+    def test_validate_issue_cloud_is_opt_in(self) -> None:
+        """Gemini should only be used when cloud validation is explicitly allowed."""
+        issue = {"value": "sensitive_value", "confidence": "high"}
+        with patch("secret_sentinel.ai_validator._query_ollama", return_value=None):
+            with patch(
+                "secret_sentinel.ai_validator._query_gemini",
+                return_value="REAL_SECRET",
+            ) as query:
+                self.assertTrue(validate_issue(issue, "context"))
+                query.assert_not_called()
+                self.assertTrue(validate_issue(issue, "context", allow_cloud=True))
+                query.assert_called_once()
+
     def test_validate_issues_filtering(self) -> None:
         """validate_issues should filter out false positives."""
         issues = [
@@ -70,7 +121,7 @@ class TestAIValidator(unittest.TestCase):
         ]
         content = "mock_key_line\nreal_key_line\n"
 
-        def mock_validate(issue, surrounding):
+        def mock_validate(issue, surrounding, allow_cloud=False):
             return issue["value"] == "real_key"
 
         with patch("secret_sentinel.ai_validator.validate_issue", side_effect=mock_validate):

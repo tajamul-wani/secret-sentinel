@@ -3,14 +3,33 @@
 import json
 import logging
 import os
+import re
 import subprocess
 from typing import Any, Dict, List, Optional
+
+from .scanner import SECRET_PATTERNS
 
 logger = logging.getLogger("secret_sentinel")
 
 DEFAULT_OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.2")
 OLLAMA_EXECUTABLE = os.getenv("OLLAMA_BIN", "ollama")
 GEMINI_API_URL = os.getenv("GEMINI_API_URL", "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent")
+PRIVATE_KEY_BLOCK_PATTERN = re.compile(
+    r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----.*?-----END [A-Z0-9 ]*PRIVATE KEY-----",
+    re.DOTALL,
+)
+
+
+def _redact_context(context: str, issues: List[Dict[str, Any]]) -> str:
+    """Redact detected credential patterns and values from AI context."""
+    redacted = PRIVATE_KEY_BLOCK_PATTERN.sub("[REDACTED PRIVATE KEY]", context)
+    for pattern in SECRET_PATTERNS.values():
+        redacted = pattern.sub("[REDACTED]", redacted)
+    for issue in issues:
+        value = str(issue.get("value", ""))
+        if value:
+            redacted = redacted.replace(value, "[REDACTED]")
+    return redacted
 
 
 def _run_command(args: List[str], cwd: Optional[str] = None, timeout: int = 5) -> Optional[subprocess.CompletedProcess]:
@@ -101,7 +120,11 @@ def _query_gemini(prompt: str) -> Optional[str]:
     return None
 
 
-def validate_issue(issue: Dict[str, Any], surrounding: str) -> bool:
+def validate_issue(
+    issue: Dict[str, Any],
+    surrounding: str,
+    allow_cloud: bool = False,
+) -> bool:
     """Evaluate whether a detected secret is likely real or a false positive.
 
     If AI services are unreachable or encounter errors, gracefully falls back
@@ -110,18 +133,22 @@ def validate_issue(issue: Dict[str, Any], surrounding: str) -> bool:
     Args:
         issue: Issue dictionary describing finding.
         surrounding: Surrounding code snippet context.
+        allow_cloud: Whether to permit sending redacted context to Gemini.
 
     Returns:
         True if issue is considered a real secret, False if false positive.
     """
+    safe_surrounding = _redact_context(surrounding, [issue])
     prompt = (
         "Inspect the following code snippet and determine whether the highlighted string "
         "is a real secret/API key or a mock/test placeholder.\n\n"
-        f"Code:\n{surrounding}\n\n"
-        f"Potential secret: {issue.get('value')}\n\n"
+        f"Code:\n{safe_surrounding}\n\n"
+        f"Potential secret ({issue.get('matcher', 'unknown type')}): [REDACTED]\n\n"
         "Answer with: REAL_SECRET or FALSE_POSITIVE."
     )
-    response = _query_ollama(prompt) or _query_gemini(prompt)
+    response = _query_ollama(prompt)
+    if not response and allow_cloud:
+        response = _query_gemini(prompt)
     if not response:
         return issue.get("confidence") == "high"
 
@@ -148,20 +175,28 @@ def build_surrounding_snippet(content: str, line_number: int, context: int = 2) 
     return "\n".join(lines[start:end])
 
 
-def validate_issues(issues: List[Dict[str, Any]], path: str, content: str) -> List[Dict[str, Any]]:
+def validate_issues(
+    issues: List[Dict[str, Any]],
+    path: str,
+    content: str,
+    allow_cloud: bool = False,
+) -> List[Dict[str, Any]]:
     """Validate a collection of detected issues using context snippets.
 
     Args:
         issues: List of detected issues.
         path: Path identifier of the source file.
         content: Full text content of the source file.
+        allow_cloud: Whether to permit sending redacted context to Gemini.
 
     Returns:
         Filtered list containing only verified issues.
     """
     verified: List[Dict[str, Any]] = []
+    redacted_content = _redact_context(content, issues)
+
     for issue in issues:
-        surrounding = build_surrounding_snippet(content, int(issue.get("line", 1)))
-        if validate_issue(issue, surrounding):
+        surrounding = build_surrounding_snippet(redacted_content, int(issue.get("line", 1)))
+        if validate_issue(issue, surrounding, allow_cloud=allow_cloud):
             verified.append(issue)
     return verified

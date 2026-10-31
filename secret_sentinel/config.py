@@ -30,16 +30,19 @@ class SecretSentinelConfig:
         ignore_globs: List[str],
         ai_enabled: bool,
         fail_on: SeverityLevel = SeverityLevel.LOW,
+        ai_cloud_enabled: bool = False,
     ) -> None:
         """Initialize configuration object.
 
         Args:
             ignore_globs: List of glob patterns to ignore during scans.
             ai_enabled: Whether AI validation is enabled.
+            ai_cloud_enabled: Whether cloud AI validation is enabled.
             fail_on: Minimum severity level that causes scan to fail.
         """
         self.ignore_globs = ignore_globs
         self.ai_enabled = ai_enabled
+        self.ai_cloud_enabled = ai_cloud_enabled
         self.fail_on = fail_on
 
     @classmethod
@@ -62,7 +65,8 @@ class SecretSentinelConfig:
             Configured SecretSentinelConfig instance.
         """
         ignore_globs = DEFAULT_IGNORE.copy()
-        ai_enabled = True
+        ai_enabled = False
+        ai_cloud_enabled = False
         fail_on = SeverityLevel.LOW
 
         root_path = Path(repo_root)
@@ -89,7 +93,10 @@ class SecretSentinelConfig:
                 ignore_globs.extend(
                     [item.strip() for item in raw_ignore.split(",") if item.strip()]
                 )
-                ai_enabled = parser.getboolean("secret-sentinel", "ai_enabled", fallback=True)
+                ai_enabled = parser.getboolean("secret-sentinel", "ai_enabled", fallback=False)
+                ai_cloud_enabled = parser.getboolean(
+                    "secret-sentinel", "ai_cloud_enabled", fallback=False
+                )
 
                 raw_fail_on = parser.get("secret-sentinel", "fail_on", fallback="LOW").strip().upper()
                 try:
@@ -97,4 +104,9 @@ class SecretSentinelConfig:
                 except KeyError:
                     fail_on = SeverityLevel.LOW
 
-        return cls(ignore_globs, ai_enabled, fail_on=fail_on)
+        return cls(
+            ignore_globs,
+            ai_enabled,
+            ai_cloud_enabled=ai_cloud_enabled,
+            fail_on=fail_on,
+        )
