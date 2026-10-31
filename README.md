@@ -42,6 +42,21 @@ secret-sentinel src/
 secret-sentinel .env.example
 ```
 
+Scan commit history reachable from the current `HEAD`:
+
+```bash
+secret-sentinel --git-history
+secret-sentinel --git-history --format sarif --output history-results.sarif
+```
+
+The history scan includes commits in the current branch's ancestry, including
+commits that were later removed from the working tree. It does not scan commits
+that are only reachable from other local branches or remote-tracking refs.
+Findings identify the earliest commit and file where a match appears. Configured
+ignore paths apply, binary files are skipped, and AI validation is not used.
+Scanning a long history can take time. This reports findings; it does not
+rewrite commits or remove secrets from repository history.
+
 Skip AI validation:
 
 ```bash

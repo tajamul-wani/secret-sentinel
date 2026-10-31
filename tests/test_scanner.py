@@ -105,6 +105,24 @@ class TestScanner(unittest.TestCase):
 
         self.assertEqual(len(issues), 1)
 
+    def test_scan_git_history_ignores_unreachable_local_branches(self) -> None:
+        """History scan should not include commits outside current HEAD ancestry."""
+        with tempfile.TemporaryDirectory() as repo_root:
+            self._initialize_history_repo(repo_root)
+            self._commit_file(repo_root, "README.txt", b"clean\n")
+            head_branch = self._run_git(repo_root, "branch", "--show-current")
+            self._run_git(repo_root, "checkout", "-q", "-b", "unmerged")
+            self._commit_file(
+                repo_root,
+                "config.py",
+                f'aws_key = "{DUMMY_AWS}"\n'.encode(),
+            )
+            self._run_git(repo_root, "checkout", "-q", head_branch)
+
+            issues = scan_git_history(repo_root)
+
+        self.assertEqual(issues, [])
+
     def test_scan_git_history_honors_ignore_globs_and_binary_content(self) -> None:
         """History scan should honor configured ignores and skip binary blobs."""
         with tempfile.TemporaryDirectory() as repo_root:
