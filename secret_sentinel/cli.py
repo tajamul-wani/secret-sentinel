@@ -260,7 +260,14 @@ def scan_paths(
         if content is None:
             verified.extend(path_issues)
             continue
-        verified.extend(validate_issues(path_issues, source_path, content))
+        verified.extend(
+            validate_issues(
+                path_issues,
+                source_path,
+                content,
+                allow_cloud=config.ai_cloud_enabled,
+            )
+        )
 
     return verified
 

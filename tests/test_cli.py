@@ -201,6 +201,13 @@ class TestCLI(unittest.TestCase):
 
     def test_main_fail_on_threshold_allows(self) -> None:
         """Issues below the fail-on threshold should not block commit (exit code 0)."""
+            config_path = os.path.join(tmpdir, ".secret-sentinel.ini")
+            with open(config_path, "w", encoding="utf-8") as handle:
+                handle.write(
+                    "[secret-sentinel]\n"
+                    "ai_enabled = true\n"
+                    "ai_cloud_enabled = true\n"
+                )
         mock_medium_issue = [
             {
                 "source": "app.py",
@@ -212,6 +219,7 @@ class TestCLI(unittest.TestCase):
                 "severity": "MEDIUM",
             }
         ]
+                    self.assertTrue(validate.call_args.kwargs["allow_cloud"])
         with patch("secret_sentinel.cli.scan_paths", return_value=mock_medium_issue):
             with patch("secret_sentinel.cli.get_git_root", return_value=None):
                 self.assertEqual(main(["--fail-on", "HIGH", "--no-ai"]), 0)
