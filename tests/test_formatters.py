@@ -39,6 +39,13 @@ class TestFormatters(unittest.TestCase):
         self.assertNotIn(DUMMY_AWS, result)
         self.assertIn("CRITICAL", result)
 
+    def test_format_text_includes_commit_provenance(self) -> None:
+        """Text output should include abbreviated commit provenance when present."""
+        issue = dict(self.sample_issues[0], commit="1234567890abcdef")
+        result = format_text([issue])
+        self.assertIn("(commit 1234567890ab)", result)
+        self.assertNotIn(DUMMY_AWS, result)
+
     def test_format_text_below_fail_on(self) -> None:
         """Text format below fail_on threshold should indicate warnings allowed."""
         medium_issue = [{
@@ -85,6 +92,12 @@ class TestFormatters(unittest.TestCase):
         self.assertEqual(len(data["issues"]), 1)
         self.assertIn("[REDACTED]", data["issues"][0]["snippet"])
 
+    def test_format_json_includes_commit_provenance(self) -> None:
+        """JSON output should preserve commit provenance."""
+        issue = dict(self.sample_issues[0], commit="1234567890abcdef")
+        data = json.loads(format_json([issue]))
+        self.assertEqual(data["issues"][0]["commit"], "1234567890abcdef")
+
     def test_format_sarif_clean(self) -> None:
         """SARIF format should adhere to schema v2.1.0."""
         data = json.loads(format_sarif([]))
@@ -113,7 +126,13 @@ class TestFormatters(unittest.TestCase):
             15,
         )
 
+    def test_format_sarif_includes_commit_provenance(self) -> None:
+        """SARIF output should preserve commit provenance in result properties."""
+        issue = dict(self.sample_issues[0], commit="1234567890abcdef")
+        data = json.loads(format_sarif([issue]))
+        result = data["runs"][0]["results"][0]
+        self.assertEqual(result["properties"]["commit"], "1234567890abcdef")
+
 
 if __name__ == "__main__":
     unittest.main()
-

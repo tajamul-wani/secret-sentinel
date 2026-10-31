@@ -31,6 +31,8 @@ def format_text(
         entry = f"{issue['source']}:{issue['line']} [{issue['matcher']}] - {safe_snippet}"
         if issue.get("entropy") is not None:
             entry += f" (entropy={issue['entropy']})"
+        if issue.get("commit"):
+            entry += f" (commit {str(issue['commit'])[:12]})"
         lines.append(entry)
 
     overall_severity = calculate_overall_severity(issues)
@@ -85,6 +87,8 @@ def format_json(
         }
         if issue.get("entropy") is not None:
             item["entropy"] = issue.get("entropy")
+        if issue.get("commit"):
+            item["commit"] = issue.get("commit")
         sanitized_issues.append(item)
 
     report = {
@@ -131,7 +135,7 @@ def format_sarif(issues: List[Dict[str, Any]], repo_root: Optional[str] = None) 
         secret_val = str(issue.get("value", ""))
         safe_snippet = sanitize_snippet(raw_snippet, secret_val)
 
-        sarif_results.append({
+        result = {
             "ruleId": rule_id,
             "level": sarif_level,
             "message": {
@@ -150,7 +154,10 @@ def format_sarif(issues: List[Dict[str, Any]], repo_root: Optional[str] = None) 
                     }
                 }
             ]
-        })
+        }
+        if issue.get("commit"):
+            result["properties"] = {"commit": issue["commit"]}
+        sarif_results.append(result)
 
     sarif_log = {
         "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
