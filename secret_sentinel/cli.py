@@ -22,6 +22,7 @@ from .scanner import (
 )
 
 logger = logging.getLogger("secret_sentinel")
+HOOK_MARKER = "# secret-sentinel managed hook"
 
 
 def setup_logging(debug: bool = False) -> None:
@@ -163,12 +164,22 @@ def install_git_hook(repo_root: str) -> None:
     try:
         hook_dir = os.path.join(repo_root, ".git", "hooks")
         if not os.path.isdir(hook_dir):
-            raise FileNotFoundError("No .git/hooks directory found in repository root.")
+            logger.error("No Git hooks directory found in repository.")
+            sys.exit(1)
         hook_path = os.path.join(hook_dir, "pre-commit")
+        if os.path.lexists(hook_path):
+            if os.path.islink(hook_path):
+                logger.error("An existing pre-commit hook cannot be replaced.")
+                sys.exit(1)
+            with open(hook_path, "r", encoding="utf-8", errors="replace") as handle:
+                if HOOK_MARKER not in handle.read():
+                    logger.error("An existing pre-commit hook cannot be replaced.")
+                    sys.exit(1)
         hook_contents = """#!/usr/bin/env python3
 import sys
 from pathlib import Path
 
+""" + HOOK_MARKER + """
 # Resolve repository root from .git/hooks/pre-commit
 repo_root = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(repo_root))
@@ -182,8 +193,8 @@ if __name__ == "__main__":
             handle.write(hook_contents)
         os.chmod(hook_path, 0o755)
         print(f"Installed pre-commit hook at {hook_path}")
-    except Exception as exc:
-        logger.error("Failed to install Git hook: %s", exc)
+    except OSError:
+        logger.error("Failed to install Git hook.")
         sys.exit(1)
 
 
@@ -195,13 +206,20 @@ def uninstall_git_hook(repo_root: str) -> None:
     """
     try:
         hook_path = os.path.join(repo_root, ".git", "hooks", "pre-commit")
-        if os.path.exists(hook_path):
+        if os.path.lexists(hook_path):
+            if os.path.islink(hook_path):
+                logger.error("The existing pre-commit hook is not managed by Secret Sentinel.")
+                sys.exit(1)
+            with open(hook_path, "r", encoding="utf-8", errors="replace") as handle:
+                if HOOK_MARKER not in handle.read():
+                    logger.error("The existing pre-commit hook is not managed by Secret Sentinel.")
+                    sys.exit(1)
             os.remove(hook_path)
             print(f"Removed pre-commit hook at {hook_path}")
         else:
             print("No pre-commit hook found to remove.")
-    except Exception as exc:
-        logger.error("Failed to remove Git hook: %s", exc)
+    except OSError:
+        logger.error("Failed to uninstall Git hook.")
         sys.exit(1)
 
 

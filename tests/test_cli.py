@@ -89,6 +89,7 @@ class TestCLI(unittest.TestCase):
             with open(hook_file, "r", encoding="utf-8") as f:
                 content = f.read()
             self.assertIn("secret_sentinel.cli", content)
+            self.assertIn("secret-sentinel managed hook", content)
 
             uninstall_git_hook(tmpdir)
             self.assertFalse(os.path.exists(hook_file))
@@ -99,6 +100,37 @@ class TestCLI(unittest.TestCase):
             with self.assertRaises(SystemExit) as ctx:
                 install_git_hook(tmpdir)
             self.assertEqual(ctx.exception.code, 1)
+
+    def test_install_git_hook_preserves_existing_hook(self) -> None:
+        """Installation must not replace a hook not managed by Secret Sentinel."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            hooks_dir = os.path.join(tmpdir, ".git", "hooks")
+            os.makedirs(hooks_dir)
+            hook_file = os.path.join(hooks_dir, "pre-commit")
+            with open(hook_file, "w", encoding="utf-8") as handle:
+                handle.write("#!/bin/sh\necho existing\n")
+
+            with self.assertRaises(SystemExit) as ctx:
+                install_git_hook(tmpdir)
+
+            self.assertEqual(ctx.exception.code, 1)
+            with open(hook_file, "r", encoding="utf-8") as handle:
+                self.assertEqual(handle.read(), "#!/bin/sh\necho existing\n")
+
+    def test_uninstall_git_hook_preserves_unmanaged_hook(self) -> None:
+        """Uninstallation must not remove a hook not managed by Secret Sentinel."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            hooks_dir = os.path.join(tmpdir, ".git", "hooks")
+            os.makedirs(hooks_dir)
+            hook_file = os.path.join(hooks_dir, "pre-commit")
+            with open(hook_file, "w", encoding="utf-8") as handle:
+                handle.write("#!/bin/sh\necho existing\n")
+
+            with self.assertRaises(SystemExit) as ctx:
+                uninstall_git_hook(tmpdir)
+
+            self.assertEqual(ctx.exception.code, 1)
+            self.assertTrue(os.path.isfile(hook_file))
 
     def test_uninstall_git_hook_not_found(self) -> None:
         """Uninstalling non-existent hook should complete without raising error."""
@@ -169,14 +201,25 @@ class TestCLI(unittest.TestCase):
     def test_cli_scan_paths_with_ai_enabled(self) -> None:
         """Test cli.scan_paths when AI validation is invoked on disk issues."""
         with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = os.path.join(tmpdir, ".secret-sentinel.ini")
+            with open(config_path, "w", encoding="utf-8") as handle:
+                handle.write(
+                    "[secret-sentinel]\n"
+                    "ai_enabled = true\n"
+                    "ai_cloud_enabled = true\n"
+                )
             secret_file = os.path.join(tmpdir, "secret.py")
             with open(secret_file, "w", encoding="utf-8") as f:
                 f.write(f'key = "{DUMMY_AWS}"\n')
 
             with patch("secret_sentinel.cli.get_git_root", return_value=tmpdir):
-                with patch("secret_sentinel.cli.validate_issues", return_value=[]):
+                with patch(
+                    "secret_sentinel.cli.validate_issues",
+                    return_value=[],
+                ) as validate:
                     issues = cli_scan_paths([secret_file], no_ai=False, staged=False, debug=False)
                     self.assertEqual(issues, [])
+                    self.assertTrue(validate.call_args.kwargs["allow_cloud"])
 
     def test_main_format_json(self) -> None:
         """Main with --format json should return exit code 0 when clean."""
@@ -201,13 +244,6 @@ class TestCLI(unittest.TestCase):
 
     def test_main_fail_on_threshold_allows(self) -> None:
         """Issues below the fail-on threshold should not block commit (exit code 0)."""
-            config_path = os.path.join(tmpdir, ".secret-sentinel.ini")
-            with open(config_path, "w", encoding="utf-8") as handle:
-                handle.write(
-                    "[secret-sentinel]\n"
-                    "ai_enabled = true\n"
-                    "ai_cloud_enabled = true\n"
-                )
         mock_medium_issue = [
             {
                 "source": "app.py",
@@ -219,7 +255,6 @@ class TestCLI(unittest.TestCase):
                 "severity": "MEDIUM",
             }
         ]
-                    self.assertTrue(validate.call_args.kwargs["allow_cloud"])
         with patch("secret_sentinel.cli.scan_paths", return_value=mock_medium_issue):
             with patch("secret_sentinel.cli.get_git_root", return_value=None):
                 self.assertEqual(main(["--fail-on", "HIGH", "--no-ai"]), 0)
