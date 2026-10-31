@@ -147,6 +147,9 @@ Remove the hook:
 secret-sentinel --uninstall-hook
 ```
 
+The installer will not overwrite an existing hook unless it is marked as managed
+by Secret Sentinel. Uninstalling removes only a Secret Sentinel-managed hook.
+
 ## Use inside another project
 
 1. Install the tool in the target repo.
@@ -172,19 +175,19 @@ Create a `.secret-sentinel.ini` in the repository root:
 [secret-sentinel]
 ignore_paths = tests/*, docs/*
 ai_enabled = false
+ai_cloud_enabled = false
 fail_on = HIGH
 ```
 
-ai_cloud_enabled = false
-### Using `.secretignore`
-
-You can also create a `.secretignore` file in your repository root to ignore specific paths or mock data:
 AI validation is disabled by default. To enable local AI validation through
 Ollama, set `ai_enabled = true`. Cloud Gemini validation is a separate opt-in:
 set both `ai_enabled = true` and `ai_cloud_enabled = true`, and configure
 `GEMINI_API_KEY`. Detected secret values are redacted before context is sent to
 either AI validator; cloud validation is attempted only when explicitly enabled.
 
+### Using `.secretignore`
+
+You can also create a `.secretignore` file in your repository root to ignore specific paths or mock data:
 
 ```text
 # Exclude test fixture data
