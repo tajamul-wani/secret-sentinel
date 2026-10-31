@@ -1,6 +1,7 @@
 """Tests for Secret Sentinel scanner engine."""
 
 import os
+import subprocess
 import tempfile
 import unittest
 from datetime import date, timedelta
@@ -15,6 +16,7 @@ from secret_sentinel.scanner import (
     get_staged_content,
     get_staged_paths,
     scan_paths,
+    scan_git_history,
     scan_staged_files,
     scan_text,
     summarize_issues,
@@ -39,6 +41,99 @@ DUMMY_DB_URI = "postgresql://admin:" + "superSecretPass123" + "@db.example.com:5
 
 class TestScanner(unittest.TestCase):
     """Test suite for secret detection patterns and scanner operations."""
+
+    @staticmethod
+    def _run_git(repo_root: str, *args: str) -> str:
+        """Run Git in a temporary test repository."""
+        result = subprocess.run(
+            ["git", *args],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return result.stdout.strip()
+
+    def _initialize_history_repo(self, repo_root: str) -> None:
+        """Initialize a repository with an isolated test identity."""
+        self._run_git(repo_root, "init", "-q")
+        self._run_git(repo_root, "config", "user.name", "Test User")
+        self._run_git(repo_root, "config", "user.email", "test@example.invalid")
+
+    def _commit_file(self, repo_root: str, path: str, content: bytes) -> str:
+        """Write and commit a test file, returning the new commit ID."""
+        full_path = os.path.join(repo_root, path)
+        os.makedirs(os.path.dirname(full_path), exist_ok=True)
+        with open(full_path, "wb") as handle:
+            handle.write(content)
+        self._run_git(repo_root, "add", "--", path)
+        self._run_git(repo_root, "commit", "-q", "-m", "test commit")
+        return self._run_git(repo_root, "rev-parse", "HEAD")
+
+    def test_scan_git_history_detects_secret_from_deleted_file(self) -> None:
+        """History scan should find a secret even after its file is deleted."""
+        with tempfile.TemporaryDirectory() as repo_root:
+            self._initialize_history_repo(repo_root)
+            first_commit = self._commit_file(
+                repo_root,
+                "config.py",
+                f'aws_key = "{DUMMY_AWS}"\n'.encode(),
+            )
+            os.remove(os.path.join(repo_root, "config.py"))
+            self._run_git(repo_root, "add", "--all")
+            self._run_git(repo_root, "commit", "-q", "-m", "remove test file")
+
+            issues = scan_git_history(repo_root)
+
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(issues[0]["source"], "config.py")
+        self.assertEqual(issues[0]["commit"], first_commit)
+        self.assertEqual(issues[0]["matcher"], "AWS Secret Access Key")
+
+    def test_scan_git_history_deduplicates_unchanged_blob(self) -> None:
+        """Unchanged files across commits should not create duplicate findings."""
+        with tempfile.TemporaryDirectory() as repo_root:
+            self._initialize_history_repo(repo_root)
+            self._commit_file(
+                repo_root,
+                "config.py",
+                f'aws_key = "{DUMMY_AWS}"\n'.encode(),
+            )
+            self._commit_file(repo_root, "notes.txt", b"additional commit\n")
+
+            issues = scan_git_history(repo_root)
+
+        self.assertEqual(len(issues), 1)
+
+    def test_scan_git_history_honors_ignore_globs_and_binary_content(self) -> None:
+        """History scan should honor configured ignores and skip binary blobs."""
+        with tempfile.TemporaryDirectory() as repo_root:
+            self._initialize_history_repo(repo_root)
+            self._commit_file(
+                repo_root,
+                "ignored/config.py",
+                f'aws_key = "{DUMMY_AWS}"\n'.encode(),
+            )
+            self._commit_file(
+                repo_root,
+                "binary.dat",
+                b"\x00" + f'aws_key = "{DUMMY_AWS}"\n'.encode(),
+            )
+            self._commit_file(
+                repo_root,
+                "src/config.py",
+                f'aws_key = "{DUMMY_AWS}"\n'.encode(),
+            )
+
+            issues = scan_git_history(repo_root, ignore_globs=["ignored/*"])
+
+        self.assertEqual([issue["source"] for issue in issues], ["src/config.py"])
+
+    def test_scan_git_history_requires_repository_history(self) -> None:
+        """History scan should report a clear error outside an initialized repo."""
+        with tempfile.TemporaryDirectory() as repo_root:
+            with self.assertRaisesRegex(RuntimeError, "Unable to read repository history"):
+                scan_git_history(repo_root)
 
     def test_scan_text_detects_aws_key(self) -> None:
         """Detect AWS access keys."""

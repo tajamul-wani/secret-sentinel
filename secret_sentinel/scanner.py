@@ -304,6 +304,74 @@ def scan_staged_files(
     return issues
 
 
+def scan_git_history(
+    repo_root: str,
+    ignore_globs: Optional[List[str]] = None,
+) -> List[Dict[str, Any]]:
+    """Scan text blobs reachable from HEAD and report each finding once.
+
+    Findings are attributed to the earliest commit in which their path and
+    detected value appear. Other refs not reachable from HEAD are not scanned.
+    """
+    commits_result = _run_git_command(
+        ["rev-list", "--reverse", "HEAD"], cwd=repo_root
+    )
+    if commits_result.returncode != 0:
+        raise RuntimeError("Unable to read repository history for scanning.")
+
+    active_ignores = ignore_globs or DEFAULT_IGNORE
+    last_blob_by_path: Dict[str, str] = {}
+    seen_findings: set[tuple[str, str, str]] = set()
+    issues: List[Dict[str, Any]] = []
+
+    for commit in commits_result.stdout.splitlines():
+        tree_result = _run_git_command(
+            ["ls-tree", "-r", "-z", "--full-tree", commit],
+            cwd=repo_root,
+            text=False,
+        )
+        if tree_result.returncode != 0:
+            raise RuntimeError("Unable to read repository history for scanning.")
+
+        for entry in tree_result.stdout.split(b"\0"):
+            if not entry:
+                continue
+            metadata, raw_path = entry.split(b"\t", 1)
+            _mode, object_type, blob_oid = metadata.decode("ascii").split()
+            if object_type != "blob":
+                continue
+
+            path = os.fsdecode(raw_path)
+            absolute_path = os.path.join(repo_root, path)
+            if _is_ignored(absolute_path, active_ignores, repo_root):
+                continue
+            if last_blob_by_path.get(path) == blob_oid:
+                continue
+            last_blob_by_path[path] = blob_oid
+
+            blob_result = _run_git_command(
+                ["cat-file", "blob", blob_oid],
+                cwd=repo_root,
+                text=False,
+            )
+            if blob_result.returncode != 0:
+                raise RuntimeError("Unable to read repository history for scanning.")
+            if not is_text_bytes(blob_result.stdout):
+                continue
+
+            source = _sanitize_source_path(absolute_path, repo_root)
+            content = blob_result.stdout.decode("utf-8", errors="replace")
+            for issue in scan_text(content, source):
+                finding_key = (source, issue["matcher"], issue["value"])
+                if finding_key in seen_findings:
+                    continue
+                seen_findings.add(finding_key)
+                issue["commit"] = commit
+                issues.append(issue)
+
+    return issues
+
+
 def scan_paths(
     paths: List[str],
     ignore_globs: Optional[List[str]] = None,
