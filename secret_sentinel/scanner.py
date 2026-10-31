@@ -4,6 +4,7 @@ import fnmatch
 import os
 import re
 import subprocess
+from datetime import date
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 
@@ -29,12 +30,11 @@ SECRET_PATTERNS = {
         r"(?i)\b(?:api[_\-]?key|secret|token|password|passwd|auth|credential|client_secret|private_key|oauth[_\-]?token)\b\s*[:=]\s*[\"']?([A-Za-z0-9_\-+\/=]{16,})[\"']?"
     ),
 }
-IGNORE_DIRECTIVE_PATTERN = re.compile(
-    r"(?i)(?:#|\/\/|\/\*)\s*secret[-_]?sentinel:\s*ignore\b"
+SUPPRESSION_DIRECTIVE_PATTERN = re.compile(
+    r"(?i)(?:#|//|/\*)\s*secret[-_]?sentinel:\s*"
+    r"(?P<action>disable[-_]next[-_]line|ignore)\b(?P<metadata>.*?)(?:\*/)?\s*$"
 )
-IGNORE_NEXT_LINE_PATTERN = re.compile(
-    r"(?i)(?:#|\/\/|\/\*)\s*secret[-_]?sentinel:\s*disable[-_]next[-_]line\b"
-)
+SUPPRESSION_EXPIRY_PATTERN = re.compile(r"(?i)\bexpires?\s*[:=]\s*([^\s;,*/]+)")
 SECRET_STRING_PATTERN = re.compile(r"[\"']([A-Za-z0-9+/=_.-]{24,})[\"']")
 ENTROPY_THRESHOLD = 4.6
 MIN_ENTROPY_LENGTH = 24
@@ -192,11 +192,26 @@ def _line_has_secret_keyword(line: str) -> bool:
     )
 
 
+def _suppression_is_active(metadata: str) -> bool:
+    """Return whether a suppression directive has not expired."""
+    expiry_match = SUPPRESSION_EXPIRY_PATTERN.search(metadata)
+    if not expiry_match:
+        return True
+
+    expiry_text = expiry_match.group(1)
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", expiry_text):
+        return False
+    try:
+        expiry = date.fromisoformat(expiry_text)
+    except ValueError:
+        return False
+    return date.today() <= expiry
+
+
 def scan_text(content: str, source: str) -> List[Dict[str, Any]]:
     """Scan string content for known secret patterns and high-entropy strings.
 
-    Supports inline suppression via `# secret-sentinel: ignore` and
-    `# secret-sentinel: disable-next-line`.
+    Supports inline and next-line suppressions, optionally with an expiry date.
 
     Args:
         content: The text content to analyze.
@@ -214,11 +229,12 @@ def scan_text(content: str, source: str) -> List[Dict[str, Any]]:
             skip_next_line = False
             continue
 
-        if IGNORE_NEXT_LINE_PATTERN.search(line):
-            skip_next_line = True
-            continue
-
-        if IGNORE_DIRECTIVE_PATTERN.search(line):
+        directive = SUPPRESSION_DIRECTIVE_PATTERN.search(line)
+        if directive and _suppression_is_active(directive.group("metadata")):
+            if directive.group("action").lower().startswith("disable"):
+                skip_next_line = True
+            else:
+                continue
             continue
 
         for name, pattern in SECRET_PATTERNS.items():
