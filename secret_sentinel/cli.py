@@ -17,6 +17,7 @@ from .scanner import (
     get_staged_content,
     get_staged_paths,
     scan_paths as scan_disk_paths,
+    scan_git_history,
     scan_staged_files,
     summarize_issues,
 )
@@ -62,6 +63,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--staged",
         action="store_true",
         help="Scan staged Git files instead of disk paths.",
+    )
+    parser.add_argument(
+        "--git-history",
+        action="store_true",
+        help="Scan commits reachable from HEAD for secrets.",
     )
     parser.add_argument(
         "--no-ai",
@@ -367,13 +373,24 @@ def main(argv: Optional[List[str]] = None) -> int:
     config = SecretSentinelConfig.load(repo_root)
     threshold = SeverityLevel[args.fail_on.upper()] if args.fail_on else config.fail_on
 
-    issues = scan_paths(args.paths, args.no_ai, staged=args.staged, debug=args.debug)
+    if args.git_history and (args.paths or args.staged):
+        logger.error("--git-history cannot be combined with paths or --staged.")
+        return 2
+
+    if args.git_history:
+        try:
+            issues = scan_git_history(repo_root, ignore_globs=config.ignore_globs)
+        except (OSError, RuntimeError):
+            logger.error("Git history scan failed.")
+            return 1
+    else:
+        issues = scan_paths(args.paths, args.no_ai, staged=args.staged, debug=args.debug)
 
     overall_severity = calculate_overall_severity(issues)
     should_block = bool(issues and (overall_severity.value >= threshold.value))
 
     history_manager = ScanHistory(repo_root)
-    scan_type = "staged" if args.staged else "manual"
+    scan_type = "git-history" if args.git_history else ("staged" if args.staged else "manual")
     status = "blocked" if should_block else "completed"
     history_manager.record_scan(issues, scan_type=scan_type, status=status)
 
