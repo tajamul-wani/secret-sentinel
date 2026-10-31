@@ -20,10 +20,10 @@ From the project root:
 python -m pip install .
 ```
 
-Or, in a project you want to protect:
+Or install directly from GitHub:
 
 ```bash
-python -m pip install "git+https://github.com/your-org/secret-sentinel.git"
+python -m pip install "git+https://github.com/tajamul-wani/secret-sentinel.git"
 ```
 
 ## Run it locally
@@ -92,14 +92,17 @@ Suppress false positives or intentional test fixtures directly in source code:
 
 ```python
 # Ignore finding on the current line
-api_key = "dummy_mock_key"  # secret-sentinel: ignore
+api_key = "dummy_mock_key"  # secret-sentinel: ignore reason: synthetic fixture
 
 # Ignore finding on the subsequent line
-# secret-sentinel: disable-next-line
+# secret-sentinel: disable-next-line reason: generated test data; expires: 2027-01-31
 api_key = "dummy_mock_key"
 ```
 
-C-style comments (`// secret-sentinel: ignore` or `/* secret-sentinel: ignore */`) are also supported.
+C-style comments (`// secret-sentinel: ignore` or `/* secret-sentinel: ignore */`)
+are also supported. Reasons and expiry dates are optional, and existing bare
+directives remain supported. Use `expires: YYYY-MM-DD` to make a suppression
+temporary; expired or invalid dates no longer suppress findings.
 
 ### Using with the `pre-commit` Framework
 
@@ -204,7 +207,3 @@ mock_data/*.json
 ## Optional AI validation
 
 If you want stronger validation, you can enable AI checking through a local Ollama setup or a configured Gemini integration. This is optional and not required for the core scanner to work.
-
-## Contributing
-
-Contributions are welcome. Keep changes focused, keep the tool safe by default, and avoid adding internal notes or private metadata to public project files.

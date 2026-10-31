@@ -3,6 +3,7 @@
 import os
 import tempfile
 import unittest
+from datetime import date, timedelta
 from unittest.mock import MagicMock, patch
 
 from secret_sentinel.scanner import (
@@ -145,6 +146,55 @@ class TestScanner(unittest.TestCase):
         issues = scan_text(content, "test.py")
         self.assertEqual(len(issues), 1)
         self.assertEqual(issues[0]["line"], 3)
+
+    def test_scan_text_ignore_with_reason_and_future_expiry(self) -> None:
+        """A documented, unexpired suppression should hide the finding."""
+        expiry = (date.today() + timedelta(days=1)).isoformat()
+        content = (
+            f'aws_key = "{DUMMY_AWS}"  # secret-sentinel: ignore '
+            f"reason: synthetic test fixture; expires: {expiry}\n"
+        )
+        self.assertEqual(scan_text(content, "test.py"), [])
+
+    def test_scan_text_expired_ignore_does_not_suppress(self) -> None:
+        """An expired suppression should leave the finding visible."""
+        content = (
+            f'aws_key = "{DUMMY_AWS}"  # secret-sentinel: ignore '
+            "reason: obsolete fixture; expires: 2000-01-01\n"
+        )
+        issues = scan_text(content, "test.py")
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(issues[0]["line"], 1)
+
+    def test_scan_text_invalid_expiry_does_not_suppress(self) -> None:
+        """A malformed expiry must not silently suppress a finding."""
+        content = (
+            f'aws_key = "{DUMMY_AWS}"  # secret-sentinel: ignore '
+            "reason: test fixture; expires: not-a-date\n"
+        )
+        self.assertEqual(len(scan_text(content, "test.py")), 1)
+
+    def test_scan_text_disable_next_line_with_expiry(self) -> None:
+        """An active next-line suppression hides only the following line."""
+        expiry = (date.today() + timedelta(days=1)).isoformat()
+        content = (
+            f"# secret-sentinel: disable-next-line reason: test fixture; expires: {expiry}\n"
+            f'aws_key1 = "{DUMMY_AWS}"\n'
+            f'aws_key2 = "{DUMMY_AWS}"\n'
+        )
+        issues = scan_text(content, "test.py")
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(issues[0]["line"], 3)
+
+    def test_scan_text_expired_disable_next_line_does_not_suppress(self) -> None:
+        """An expired next-line suppression must not hide the following finding."""
+        content = (
+            "# secret-sentinel: disable-next-line reason: test fixture; expires: 2000-01-01\n"
+            f'aws_key = "{DUMMY_AWS}"\n'
+        )
+        issues = scan_text(content, "test.py")
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(issues[0]["line"], 2)
 
     def test_scan_text_detects_generic_secret(self) -> None:
         """Detect generic secret assignments."""
