@@ -43,6 +43,11 @@ class TestCLI(unittest.TestCase):
         self.assertTrue(args.staged)
         self.assertTrue(args.no_ai)
 
+    def test_parse_args_for_git_history_scan(self) -> None:
+        """Parse the distinct Git history scan option."""
+        args = parse_args(["--git-history"])
+        self.assertTrue(args.git_history)
+
     def test_parse_args_for_file_paths(self) -> None:
         """Test positional path arguments."""
         args = parse_args(["src", "tests"])
@@ -161,6 +166,45 @@ class TestCLI(unittest.TestCase):
             with patch("secret_sentinel.cli.get_git_root", return_value=None):
                 exit_code = main(["--no-ai"])
                 self.assertEqual(exit_code, 1)
+
+    def test_main_git_history_scan_uses_threshold_and_records_history(self) -> None:
+        """Git history mode should scan, format, and record its own scan type."""
+        issue = {
+            "source": "config.py",
+            "line": 2,
+            "matcher": "AWS Secret Access Key",
+            "value": DUMMY_AWS,
+            "snippet": f'key = "{DUMMY_AWS}"',
+            "confidence": "high",
+            "severity": "CRITICAL",
+            "commit": "0123456789abcdef",
+        }
+        with tempfile.TemporaryDirectory() as repo_root:
+            history = ScanHistory(repo_root)
+            with patch("secret_sentinel.cli.get_git_root", return_value=repo_root):
+                with patch("secret_sentinel.cli.scan_git_history", return_value=[issue]) as scan:
+                    self.assertEqual(main(["--git-history", "--format", "json"]), 1)
+                    scan.assert_called_once()
+            records = history.get_history()
+
+        self.assertEqual(records[0]["scan_type"], "git-history")
+        self.assertEqual(records[0]["status"], "blocked")
+
+    def test_main_git_history_scan_rejects_paths_and_staged(self) -> None:
+        """History mode should not ambiguously accept current-tree scan options."""
+        with patch("secret_sentinel.cli.get_git_root", return_value=None):
+            self.assertEqual(main(["--git-history", "src/"]), 2)
+            self.assertEqual(main(["--git-history", "--staged"]), 2)
+
+    def test_main_git_history_scan_reports_errors(self) -> None:
+        """History scan errors should fail explicitly with a generic message."""
+        with tempfile.TemporaryDirectory() as repo_root:
+            with patch("secret_sentinel.cli.get_git_root", return_value=repo_root):
+                with patch(
+                    "secret_sentinel.cli.scan_git_history",
+                    side_effect=RuntimeError("internal detail"),
+                ):
+                    self.assertEqual(main(["--git-history"]), 1)
 
     def test_main_history_and_stats_with_data(self) -> None:
         """Test history and statistics CLI commands when records exist."""
