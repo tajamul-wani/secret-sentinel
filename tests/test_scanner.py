@@ -123,6 +123,26 @@ class TestScanner(unittest.TestCase):
 
         self.assertEqual(issues, [])
 
+    def test_scan_git_history_scans_all_refs_when_requested(self) -> None:
+        """All-refs history mode should find secrets on unmerged branches."""
+        with tempfile.TemporaryDirectory() as repo_root:
+            self._initialize_history_repo(repo_root)
+            self._commit_file(repo_root, "README.txt", b"clean\n")
+            head_branch = self._run_git(repo_root, "branch", "--show-current")
+            self._run_git(repo_root, "checkout", "-q", "-b", "unmerged")
+            branch_commit = self._commit_file(
+                repo_root,
+                "config.py",
+                f'aws_key = "{DUMMY_AWS}"\n'.encode(),
+            )
+            self._run_git(repo_root, "checkout", "-q", head_branch)
+
+            issues = scan_git_history(repo_root, all_refs=True)
+
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(issues[0]["source"], "config.py")
+        self.assertEqual(issues[0]["commit"], branch_commit)
+
     def test_scan_git_history_honors_ignore_globs_and_binary_content(self) -> None:
         """History scan should honor configured ignores and skip binary blobs."""
         with tempfile.TemporaryDirectory() as repo_root:

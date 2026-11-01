@@ -307,14 +307,17 @@ def scan_staged_files(
 def scan_git_history(
     repo_root: str,
     ignore_globs: Optional[List[str]] = None,
+    all_refs: bool = False,
 ) -> List[Dict[str, Any]]:
-    """Scan text blobs reachable from HEAD and report each finding once.
+    """Scan text blobs reachable from HEAD or all refs and report each finding once.
 
     Findings are attributed to the earliest commit in which their path and
-    detected value appear. Other refs not reachable from HEAD are not scanned.
+    detected value appear. When all_refs is false, refs not reachable from HEAD
+    are not scanned.
     """
+    revisions = ["--all"] if all_refs else ["HEAD"]
     commits_result = _run_git_command(
-        ["rev-list", "--reverse", "HEAD"], cwd=repo_root
+        ["rev-list", "--reverse", *revisions], cwd=repo_root
     )
     if commits_result.returncode != 0:
         raise RuntimeError("Unable to read repository history for scanning.")

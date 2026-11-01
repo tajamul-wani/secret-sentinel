@@ -47,6 +47,8 @@ class TestCLI(unittest.TestCase):
         """Parse the distinct Git history scan option."""
         args = parse_args(["--git-history"])
         self.assertTrue(args.git_history)
+        self.assertFalse(args.all_refs)
+        self.assertTrue(parse_args(["--git-history", "--all-refs"]).all_refs)
 
     def test_parse_args_for_baseline_modes(self) -> None:
         """Parse baseline checking and initialization modes."""
@@ -286,6 +288,22 @@ class TestCLI(unittest.TestCase):
 
         self.assertEqual(records[0]["scan_type"], "git-history")
         self.assertEqual(records[0]["status"], "blocked")
+
+    def test_main_all_refs_requires_git_history(self) -> None:
+        """All-refs mode is only valid for a Git history scan."""
+        with patch("secret_sentinel.cli.get_git_root", return_value=None):
+            self.assertEqual(main(["--all-refs"]), 2)
+
+    def test_main_git_history_forwards_all_refs_option(self) -> None:
+        """The CLI should pass all-refs mode to the history scanner."""
+        with tempfile.TemporaryDirectory() as repo_root:
+            with patch("secret_sentinel.cli.get_git_root", return_value=repo_root):
+                with patch("secret_sentinel.cli.scan_git_history", return_value=[]) as scan:
+                    self.assertEqual(
+                        main(["--git-history", "--all-refs", "--no-ai"]),
+                        0,
+                    )
+            self.assertTrue(scan.call_args.kwargs["all_refs"])
 
     def test_main_git_history_scan_rejects_paths_and_staged(self) -> None:
         """History mode should not ambiguously accept current-tree scan options."""
