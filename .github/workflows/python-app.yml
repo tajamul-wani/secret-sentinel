@@ -32,8 +32,20 @@ jobs:
       - name: Run tests and verify >=80% coverage threshold
         run: python tests/run_coverage.py
 
-      - name: Run self-scan and generate SARIF report
+      - name: Scan pull request and generate SARIF report
+        if: github.event_name == 'pull_request'
         run: secret-sentinel . --format sarif --output results.sarif
+
+      - name: Scan push and generate SARIF report
+        if: github.event_name == 'push'
+        env:
+          SECRET_SENTINEL_BASELINE_KEY: ${{ secrets.SECRET_SENTINEL_BASELINE_KEY }}
+        run: |
+          if [[ -n "$SECRET_SENTINEL_BASELINE_KEY" && -f .secret-sentinel/baseline.json ]]; then
+            secret-sentinel --baseline . --format sarif --output results.sarif
+          else
+            secret-sentinel . --format sarif --output results.sarif
+          fi
 
       - name: Upload SARIF report to GitHub Code Scanning
         uses: github/codeql-action/upload-sarif@v3
