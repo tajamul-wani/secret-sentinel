@@ -111,6 +111,18 @@ class TestConfig(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "invalid severity"):
                 SecretSentinelConfig.load(tmpdir)
 
+    def test_load_rejects_empty_matching_custom_rule(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / ".secret-sentinel.ini"
+            config_path.write_text(
+                "[custom_rules]\n"
+                "Empty Match = HIGH | a*\n",
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(ValueError, "must not match an empty string"):
+                SecretSentinelConfig.load(tmpdir)
+
 
 if __name__ == "__main__":
     unittest.main()

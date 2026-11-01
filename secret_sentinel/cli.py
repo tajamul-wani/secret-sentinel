@@ -1,6 +1,7 @@
 """Command-line interface for Secret Sentinel."""
 
 import argparse
+import configparser
 import logging
 import os
 import sys
@@ -9,7 +10,7 @@ from typing import Any, Dict, List, Optional
 
 from .ai_validator import validate_issues
 from .baseline import ScanBaseline
-from .config import SecretSentinelConfig
+from .config import CustomRule, SecretSentinelConfig
 from .formatters import format_json, format_sarif, format_text
 from .history import ScanHistory
 from .risk_scoring import SeverityLevel, calculate_overall_severity
@@ -251,6 +252,7 @@ def scan_paths(
     no_ai: bool,
     staged: bool,
     debug: bool = False,
+    custom_rules: Optional[List[CustomRule]] = None,
 ) -> List[Dict[str, Any]]:
     """Execute secret scan across paths or staged changes, optionally applying AI validation.
 
@@ -273,10 +275,20 @@ def scan_paths(
         logger.debug("ai_enabled=%s", config.ai_enabled)
 
     issues: List[Dict[str, Any]] = []
+    active_custom_rules = config.custom_rules if custom_rules is None else custom_rules
     if staged or not paths:
-        issues = scan_staged_files(ignore_globs=ignore_globs, repo_root=repo_root)
+        issues = scan_staged_files(
+            ignore_globs=ignore_globs,
+            repo_root=repo_root,
+            custom_rules=active_custom_rules,
+        )
     else:
-        issues = scan_disk_paths(paths, ignore_globs=ignore_globs, repo_root=repo_root)
+        issues = scan_disk_paths(
+            paths,
+            ignore_globs=ignore_globs,
+            repo_root=repo_root,
+            custom_rules=active_custom_rules,
+        )
 
     if no_ai or not config.ai_enabled or not issues:
         return issues
@@ -397,7 +409,11 @@ def main(argv: Optional[List[str]] = None) -> int:
         uninstall_git_hook(repo_root)
         return 0
 
-    config = SecretSentinelConfig.load(repo_root)
+    try:
+        config = SecretSentinelConfig.load(repo_root)
+    except (OSError, configparser.Error, ValueError) as exc:
+        logger.error("Failed to load configuration: %s", exc)
+        return 2
     threshold = SeverityLevel[args.fail_on.upper()] if args.fail_on else config.fail_on
 
     if args.git_history and (args.paths or args.staged):
@@ -416,12 +432,19 @@ def main(argv: Optional[List[str]] = None) -> int:
                 repo_root,
                 ignore_globs=config.ignore_globs,
                 all_refs=args.all_refs,
+                custom_rules=config.custom_rules,
             )
         except (OSError, RuntimeError):
             logger.error("Git history scan failed.")
             return 1
     else:
-        issues = scan_paths(args.paths, args.no_ai, staged=args.staged, debug=args.debug)
+        issues = scan_paths(
+            args.paths,
+            args.no_ai,
+            staged=args.staged,
+            debug=args.debug,
+            custom_rules=config.custom_rules,
+        )
 
     if args.update_baseline:
         try:

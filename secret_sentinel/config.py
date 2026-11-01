@@ -138,6 +138,10 @@ class SecretSentinelConfig:
                         raise ValueError(
                             f"Custom rule {name!r} has an invalid regular expression: {exc}"
                         ) from exc
+                    if pattern.match(""):
+                        raise ValueError(
+                            f"Custom rule {name!r} must not match an empty string."
+                        )
                     custom_rules.append(CustomRule(name.strip(), pattern, severity))
 
         return cls(

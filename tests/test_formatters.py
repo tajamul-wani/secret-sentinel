@@ -136,6 +136,16 @@ class TestFormatters(unittest.TestCase):
         )
         self.assertIn("Deactivate the access key in IAM", result["properties"]["remediation"][0])
 
+    def test_format_sarif_uses_configured_custom_severity(self) -> None:
+        issue = dict(
+            self.sample_issues[0],
+            matcher="Company API Token",
+            severity="CRITICAL",
+        )
+        data = json.loads(format_sarif([issue]))
+
+        self.assertEqual(data["runs"][0]["results"][0]["level"], "error")
+
     def test_format_sarif_includes_commit_provenance(self) -> None:
         """SARIF output should preserve commit provenance in result properties."""
         issue = dict(self.sample_issues[0], commit="1234567890abcdef")

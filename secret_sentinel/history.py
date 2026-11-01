@@ -6,7 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from .risk_scoring import SeverityLevel
+from .risk_scoring import SeverityLevel, get_issue_severity
 
 
 class ScanHistory:
@@ -147,13 +147,10 @@ class ScanHistory:
         Returns:
             Dictionary mapping SeverityLevel to count.
         """
-        from .risk_scoring import get_risk_score
-
         counts = {level: 0 for level in SeverityLevel}
 
         for issue in issues:
-            matcher = str(issue.get("matcher", "High entropy string"))
-            severity = get_risk_score(matcher)
+            severity = get_issue_severity(issue)
             counts[severity] += 1
 
         return counts
