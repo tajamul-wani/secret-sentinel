@@ -123,6 +123,18 @@ class TestConfig(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "must not match an empty string"):
                 SecretSentinelConfig.load(tmpdir)
 
+    def test_load_rejects_custom_rule_name_conflicting_with_builtin(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / ".secret-sentinel.ini"
+            config_path.write_text(
+                "[custom_rules]\n"
+                "AWS Secret Access Key = HIGH | custom_[A-Za-z0-9]+\n",
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(ValueError, "conflicts with a built-in rule name"):
+                SecretSentinelConfig.load(tmpdir)
+
 
 if __name__ == "__main__":
     unittest.main()
