@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Pattern
 
-from .risk_scoring import SeverityLevel
+from .risk_scoring import SECRET_RISK_SCORES, SeverityLevel
 
 
 @dataclass(frozen=True)
@@ -121,28 +121,33 @@ class SecretSentinelConfig:
                     fail_on = SeverityLevel.LOW
             if parser.has_section("custom_rules"):
                 for name, definition in parser.items("custom_rules"):
+                    rule_name = name.strip()
+                    if rule_name in SECRET_RISK_SCORES:
+                        raise ValueError(
+                            f"Custom rule {rule_name!r} conflicts with a built-in rule name."
+                        )
                     severity_text, separator, pattern_text = definition.partition("|")
                     if not separator or not severity_text.strip() or not pattern_text.strip():
                         raise ValueError(
-                            f"Custom rule {name!r} must use SEVERITY | REGEX format."
+                            f"Custom rule {rule_name!r} must use SEVERITY | REGEX format."
                         )
                     try:
                         severity = SeverityLevel[severity_text.strip().upper()]
                     except KeyError as exc:
                         raise ValueError(
-                            f"Custom rule {name!r} has an invalid severity."
+                            f"Custom rule {rule_name!r} has an invalid severity."
                         ) from exc
                     try:
                         pattern = re.compile(pattern_text.strip())
                     except re.error as exc:
                         raise ValueError(
-                            f"Custom rule {name!r} has an invalid regular expression: {exc}"
+                            f"Custom rule {rule_name!r} has an invalid regular expression: {exc}"
                         ) from exc
                     if pattern.match(""):
                         raise ValueError(
-                            f"Custom rule {name!r} must not match an empty string."
+                            f"Custom rule {rule_name!r} must not match an empty string."
                         )
-                    custom_rules.append(CustomRule(name.strip(), pattern, severity))
+                    custom_rules.append(CustomRule(rule_name, pattern, severity))
 
         return cls(
             ignore_globs,
