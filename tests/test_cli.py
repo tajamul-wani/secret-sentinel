@@ -357,6 +357,35 @@ class TestCLI(unittest.TestCase):
             issues = cli_scan_paths([clean_file, secret_file], no_ai=True, staged=False, debug=True)
             self.assertTrue(any(i["matcher"] == "AWS Secret Access Key" for i in issues))
 
+    def test_cli_scan_uses_custom_rule_severity(self) -> None:
+        """Configured custom rules should participate in severity blocking."""
+        with tempfile.TemporaryDirectory() as repo_root:
+            config_path = os.path.join(repo_root, ".secret-sentinel.ini")
+            with open(config_path, "w", encoding="utf-8") as handle:
+                handle.write(
+                    "[custom_rules]\n"
+                    "Company API Token = CRITICAL | \\bcorp_[A-Za-z0-9]{20}\\b\n"
+                )
+            token = "corp_" + "a" * 20
+            source_path = os.path.join(repo_root, "settings.py")
+            with open(source_path, "w", encoding="utf-8") as handle:
+                handle.write(f'api_token = "{token}"\n')
+
+            with patch("secret_sentinel.cli.get_git_root", return_value=repo_root):
+                self.assertEqual(
+                    main(["--no-ai", "--fail-on", "HIGH", source_path]),
+                    1,
+                )
+
+    def test_cli_reports_invalid_custom_rule_config(self) -> None:
+        """Invalid detector configuration should fail with a CLI error."""
+        with tempfile.TemporaryDirectory() as repo_root:
+            config_path = os.path.join(repo_root, ".secret-sentinel.ini")
+            with open(config_path, "w", encoding="utf-8") as handle:
+                handle.write("[custom_rules]\nBroken = HIGH | [\n")
+            with patch("secret_sentinel.cli.get_git_root", return_value=repo_root):
+                self.assertEqual(main(["--no-ai"]), 2)
+
     def test_cli_scan_paths_with_ai_enabled(self) -> None:
         """Test cli.scan_paths when AI validation is invoked on disk issues."""
         with tempfile.TemporaryDirectory() as tmpdir:

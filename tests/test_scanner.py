@@ -1,12 +1,15 @@
 """Tests for Secret Sentinel scanner engine."""
 
 import os
+import re
 import subprocess
 import tempfile
 import unittest
 from datetime import date, timedelta
 from unittest.mock import MagicMock, patch
 
+from secret_sentinel.config import CustomRule
+from secret_sentinel.risk_scoring import SeverityLevel
 from secret_sentinel.scanner import (
     _is_ignored,
     _line_has_secret_keyword,
@@ -89,6 +92,28 @@ class TestScanner(unittest.TestCase):
         self.assertEqual(issues[0]["source"], "config.py")
         self.assertEqual(issues[0]["commit"], first_commit)
         self.assertEqual(issues[0]["matcher"], "AWS Secret Access Key")
+
+    def test_scan_git_history_applies_custom_rules(self) -> None:
+        """History scans should use configured detectors and their severity."""
+        custom_rule = CustomRule(
+            name="Company API Token",
+            pattern=re.compile(r"\bcorp_[A-Za-z0-9]{20}\b"),
+            severity=SeverityLevel.HIGH,
+        )
+        token = "corp_" + "b" * 20
+        with tempfile.TemporaryDirectory() as repo_root:
+            self._initialize_history_repo(repo_root)
+            self._commit_file(
+                repo_root,
+                "settings.py",
+                f'api_token = "{token}"\n'.encode(),
+            )
+
+            issues = scan_git_history(repo_root, custom_rules=[custom_rule])
+
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(issues[0]["matcher"], custom_rule.name)
+        self.assertEqual(issues[0]["severity"], "HIGH")
 
     def test_scan_git_history_deduplicates_unchanged_blob(self) -> None:
         """Unchanged files across commits should not create duplicate findings."""
@@ -178,6 +203,22 @@ class TestScanner(unittest.TestCase):
         content = f'aws_key = "{DUMMY_AWS}"\n'
         issues = scan_text(content, "config.py")
         self.assertTrue(any(i["matcher"] == "AWS Secret Access Key" for i in issues))
+
+    def test_scan_text_detects_configured_custom_rule(self) -> None:
+        """Custom patterns report their configured name and severity."""
+        rule = CustomRule(
+            name="Company API Token",
+            pattern=re.compile(r"\bcorp_[A-Za-z0-9]{20}\b"),
+            severity=SeverityLevel.CRITICAL,
+        )
+        value = "corp_" + "a" * 20
+
+        issues = scan_text(f'token = "{value}"', "settings.py", [rule])
+
+        match = next(issue for issue in issues if issue["matcher"] == rule.name)
+        self.assertEqual(match["value"], value)
+        self.assertEqual(match["severity"], "CRITICAL")
+        self.assertEqual(match["reason"], "custom-pattern")
 
     def test_scan_text_detects_google_key(self) -> None:
         """Detect Google API keys."""

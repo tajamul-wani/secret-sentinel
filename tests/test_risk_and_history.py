@@ -54,6 +54,12 @@ class TestRiskScoring(TestCase):
         ]
         assert calculate_overall_severity(issues) == SeverityLevel.HIGH
 
+    def test_custom_issue_severity_is_honored(self):
+        issues = [
+            {"matcher": "Company API Token", "severity": "CRITICAL"},
+        ]
+        assert calculate_overall_severity(issues) == SeverityLevel.CRITICAL
+
 
 class TestScanHistory(TestCase):
     """Tests for scan history functionality."""
@@ -110,6 +116,16 @@ class TestScanHistory(TestCase):
         assert stats["total_issues_found"] == 3
         assert stats["severity_summary"]["CRITICAL"] == 2
         assert stats["severity_summary"]["MEDIUM"] == 1
+
+    def test_history_counts_custom_rule_severity(self):
+        self.history.record_scan(
+            [{"matcher": "Company API Token", "severity": "CRITICAL"}],
+            scan_type="manual",
+        )
+
+        stats = self.history.get_statistics()
+
+        assert stats["severity_summary"]["CRITICAL"] == 1
 
     def test_clear_history(self):
         """Test clearing history."""

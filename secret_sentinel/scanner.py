@@ -8,6 +8,7 @@ from datetime import date
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 
+from .config import CustomRule
 from .utils import is_text_bytes, sanitize_snippet, shannon_entropy
 from .risk_scoring import get_risk_score
 
@@ -208,7 +209,11 @@ def _suppression_is_active(metadata: str) -> bool:
     return date.today() <= expiry
 
 
-def scan_text(content: str, source: str) -> List[Dict[str, Any]]:
+def scan_text(
+    content: str,
+    source: str,
+    custom_rules: Optional[List[CustomRule]] = None,
+) -> List[Dict[str, Any]]:
     """Scan string content for known secret patterns and high-entropy strings.
 
     Supports inline and next-line suppressions, optionally with an expiry date.
@@ -216,6 +221,7 @@ def scan_text(content: str, source: str) -> List[Dict[str, Any]]:
     Args:
         content: The text content to analyze.
         source: Source identifier (e.g. file path).
+        custom_rules: Optional configured regular-expression rules.
 
     Returns:
         List of issue dictionaries describing each finding.
@@ -253,6 +259,20 @@ def scan_text(content: str, source: str) -> List[Dict[str, Any]]:
                         "severity": severity.name,
                     }
                 )
+        for rule in custom_rules or []:
+            for match in rule.pattern.finditer(line):
+                issues.append(
+                    {
+                        "source": source,
+                        "line": lineno,
+                        "matcher": rule.name,
+                        "value": match.group(0),
+                        "snippet": line.strip(),
+                        "confidence": "high",
+                        "reason": "custom-pattern",
+                        "severity": rule.severity.name,
+                    }
+                )
         for match in SECRET_STRING_PATTERN.finditer(line):
             value = match.group(1)
             if len(value) < MIN_ENTROPY_LENGTH:
@@ -279,7 +299,9 @@ def scan_text(content: str, source: str) -> List[Dict[str, Any]]:
 
 
 def scan_staged_files(
-    ignore_globs: Optional[List[str]] = None, repo_root: Optional[str] = None
+    ignore_globs: Optional[List[str]] = None,
+    repo_root: Optional[str] = None,
+    custom_rules: Optional[List[CustomRule]] = None,
 ) -> List[Dict[str, Any]]:
     """Scan all files currently staged in Git index.
 
@@ -300,7 +322,7 @@ def scan_staged_files(
         if content is None:
             continue
         safe_path = _sanitize_source_path(path, repo_root)
-        issues.extend(scan_text(content, safe_path))
+        issues.extend(scan_text(content, safe_path, custom_rules=custom_rules))
     return issues
 
 
@@ -308,6 +330,7 @@ def scan_git_history(
     repo_root: str,
     ignore_globs: Optional[List[str]] = None,
     all_refs: bool = False,
+    custom_rules: Optional[List[CustomRule]] = None,
 ) -> List[Dict[str, Any]]:
     """Scan text blobs reachable from HEAD or all refs and report each finding once.
 
@@ -364,7 +387,7 @@ def scan_git_history(
 
             source = _sanitize_source_path(absolute_path, repo_root)
             content = blob_result.stdout.decode("utf-8", errors="replace")
-            for issue in scan_text(content, source):
+            for issue in scan_text(content, source, custom_rules=custom_rules):
                 finding_key = (source, issue["matcher"], issue["value"])
                 if finding_key in seen_findings:
                     continue
@@ -379,6 +402,7 @@ def scan_paths(
     paths: List[str],
     ignore_globs: Optional[List[str]] = None,
     repo_root: Optional[str] = None,
+    custom_rules: Optional[List[CustomRule]] = None,
 ) -> List[Dict[str, Any]]:
     """Scan specified file and directory paths on disk.
 
@@ -415,7 +439,7 @@ def scan_paths(
                     except OSError:
                         continue
                     safe_source = _sanitize_source_path(full_path, repo_root)
-                    issues.extend(scan_text(content, safe_source))
+                    issues.extend(scan_text(content, safe_source, custom_rules=custom_rules))
             continue
         if not os.path.isfile(path):
             continue
@@ -431,7 +455,7 @@ def scan_paths(
         except OSError:
             continue
         safe_source = _sanitize_source_path(path, repo_root)
-        issues.extend(scan_text(content, safe_source))
+        issues.extend(scan_text(content, safe_source, custom_rules=custom_rules))
     return issues
 
 

@@ -4,7 +4,7 @@ import json
 from typing import Any, Dict, List, Optional
 
 from .remediation import get_remediation
-from .risk_scoring import SeverityLevel, calculate_overall_severity
+from .risk_scoring import SeverityLevel, calculate_overall_severity, get_issue_severity
 from .utils import sanitize_snippet
 
 
@@ -135,7 +135,7 @@ def format_sarif(
 
     for issue in issues:
         rule_id = str(issue.get("matcher", "SecretDetection"))
-        severity = str(issue.get("severity", "MEDIUM")).upper()
+        severity = get_issue_severity(issue).name
         sarif_level = "error" if severity in ("CRITICAL", "HIGH") else "warning"
 
         if rule_id not in rules_dict:

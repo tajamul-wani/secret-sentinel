@@ -50,6 +50,17 @@ def get_risk_score(matcher: str) -> SeverityLevel:
     return SECRET_RISK_SCORES.get(matcher, SeverityLevel.MEDIUM)
 
 
+def get_issue_severity(issue: Dict[str, Any]) -> SeverityLevel:
+    """Return a valid explicit issue severity or the built-in matcher score."""
+    severity_name = issue.get("severity")
+    if isinstance(severity_name, str):
+        try:
+            return SeverityLevel[severity_name.upper()]
+        except KeyError:
+            pass
+    return get_risk_score(str(issue.get("matcher", "High entropy string")))
+
+
 def calculate_overall_severity(issues: List[Dict[str, Any]]) -> SeverityLevel:
     """Calculate the overall severity level for a set of issues.
 
@@ -64,8 +75,7 @@ def calculate_overall_severity(issues: List[Dict[str, Any]]) -> SeverityLevel:
 
     max_severity = SeverityLevel.LOW
     for issue in issues:
-        matcher = str(issue.get("matcher", "High entropy string"))
-        severity = get_risk_score(matcher)
+        severity = get_issue_severity(issue)
         if severity.value > max_severity.value:
             max_severity = severity
 
