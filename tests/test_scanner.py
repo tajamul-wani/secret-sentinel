@@ -19,6 +19,7 @@ from secret_sentinel.scanner import (
     get_staged_content,
     get_staged_paths,
     scan_paths,
+    scan_git_diff,
     scan_git_history,
     scan_staged_files,
     scan_text,
@@ -197,6 +198,58 @@ class TestScanner(unittest.TestCase):
         with tempfile.TemporaryDirectory() as repo_root:
             with self.assertRaisesRegex(RuntimeError, "Unable to read repository history"):
                 scan_git_history(repo_root)
+
+    def test_scan_git_diff_reports_only_added_secret_lines(self) -> None:
+        """Existing findings are omitted when their lines are unchanged."""
+        with tempfile.TemporaryDirectory() as repo_root:
+            self._initialize_history_repo(repo_root)
+            path = os.path.join(repo_root, "config with spaces.py")
+            original = f'old_key = "{DUMMY_AWS}"\n'
+            relative_path = "config with spaces.py"
+            base_commit = self._commit_file(repo_root, relative_path, original.encode())
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write(
+                    original
+                    + f'new_key = "{DUMMY_AWS}"\n'
+                    + 'internal_token = "corp_' + "c" * 20 + '"\n'
+                )
+
+            custom_rule = CustomRule(
+                name="Company API Token",
+                pattern=re.compile(r"\bcorp_[A-Za-z0-9]{20}\b"),
+                severity=SeverityLevel.HIGH,
+            )
+            issues = scan_git_diff(
+                base_commit,
+                repo_root,
+                custom_rules=[custom_rule],
+            )
+
+        self.assertEqual([issue["line"] for issue in issues], [2, 3])
+        self.assertEqual(
+            [issue["matcher"] for issue in issues],
+            ["AWS Secret Access Key", "Company API Token"],
+        )
+
+    def test_scan_git_diff_ignores_removed_secret_lines(self) -> None:
+        """Deleting an old finding should not report it as a new finding."""
+        with tempfile.TemporaryDirectory() as repo_root:
+            self._initialize_history_repo(repo_root)
+            path = os.path.join(repo_root, "config.py")
+            original = f'old_key = "{DUMMY_AWS}"\n'
+            base_commit = self._commit_file(repo_root, "config.py", original.encode())
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write("old_key = None\n")
+
+            issues = scan_git_diff(base_commit, repo_root)
+
+        self.assertEqual(issues, [])
+
+    def test_scan_git_diff_rejects_unknown_base(self) -> None:
+        with tempfile.TemporaryDirectory() as repo_root:
+            self._initialize_history_repo(repo_root)
+            with self.assertRaisesRegex(ValueError, "Unable to resolve diff base"):
+                scan_git_diff("missing-base", repo_root)
 
     def test_scan_text_detects_aws_key(self) -> None:
         """Detect AWS access keys."""
@@ -484,6 +537,22 @@ class TestScanner(unittest.TestCase):
                 issues = scan_staged_files()
                 self.assertTrue(any(i["matcher"] == "AWS Secret Access Key" for i in issues))
                 self.assertEqual(issues[0]["source"], "app.py")
+
+    def test_scan_staged_files_applies_custom_rules(self) -> None:
+        rule = CustomRule(
+            name="Company API Token",
+            pattern=re.compile(r"\bcorp_[A-Za-z0-9]{20}\b"),
+            severity=SeverityLevel.CRITICAL,
+        )
+        with patch("secret_sentinel.scanner.get_staged_paths", return_value=["app.py"]):
+            with patch(
+                "secret_sentinel.scanner.get_staged_content",
+                return_value='token = "corp_' + "d" * 20 + '"\n',
+            ):
+                issues = scan_staged_files(custom_rules=[rule])
+
+        custom_issue = next(issue for issue in issues if issue["matcher"] == rule.name)
+        self.assertEqual(custom_issue["severity"], "CRITICAL")
 
     def test_scan_staged_files_none_content(self) -> None:
         """Staged files returning None content should be safely skipped."""

@@ -42,6 +42,17 @@ secret-sentinel src/
 secret-sentinel .env.example
 ```
 
+Scan only newly added or modified lines relative to a base ref:
+
+```bash
+secret-sentinel --diff origin/main
+secret-sentinel --diff origin/main --format sarif --output results.sarif
+```
+
+Diff scanning requires a Git repository and an available base commit/ref. It
+checks added lines in tracked files and skips removed lines, which is useful
+for reviewing a branch without re-reporting unchanged findings elsewhere.
+
 Scan commit history reachable from the current `HEAD`:
 
 ```bash
@@ -128,6 +139,24 @@ without the key from adding valid suppressions.
 scan, so review new findings before refreshing it. Commit the baseline file if
 the team should share it. Baseline checks also work with staged scans and
 `--git-history`.
+
+### Custom Detection Rules
+
+Add organization-specific regular expressions to `.secret-sentinel.ini` under
+`[custom_rules]`. Each entry is named and specifies a severity followed by a
+regular expression:
+
+```ini
+[custom_rules]
+Internal API Token = CRITICAL | \bcorp_[A-Za-z0-9]{32}\b
+Build Service Password = HIGH | build_[A-Fa-f0-9]{40}
+```
+
+Custom rules run alongside built-in detectors in manual, staged, diff, and
+history scans. They honor ignore directives and work with baseline filtering.
+Patterns match the complete reported value; invalid severity levels, invalid
+expressions, and patterns that match an empty string stop the scan with a
+configuration error. Keep this configuration free of real credential values.
 
 ### GitHub Actions
 

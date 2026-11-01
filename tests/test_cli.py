@@ -49,6 +49,7 @@ class TestCLI(unittest.TestCase):
         self.assertTrue(args.git_history)
         self.assertFalse(args.all_refs)
         self.assertTrue(parse_args(["--git-history", "--all-refs"]).all_refs)
+        self.assertEqual(parse_args(["--diff", "origin/main"]).diff, "origin/main")
 
     def test_parse_args_for_baseline_modes(self) -> None:
         """Parse baseline checking and initialization modes."""
@@ -310,6 +311,18 @@ class TestCLI(unittest.TestCase):
         with patch("secret_sentinel.cli.get_git_root", return_value=None):
             self.assertEqual(main(["--git-history", "src/"]), 2)
             self.assertEqual(main(["--git-history", "--staged"]), 2)
+
+    def test_main_diff_rejects_paths_and_staged(self) -> None:
+        with patch("secret_sentinel.cli.get_git_root", return_value=None):
+            self.assertEqual(main(["--diff", "HEAD~1", "src/"]), 2)
+            self.assertEqual(main(["--diff", "HEAD~1", "--staged"]), 2)
+
+    def test_main_diff_forwards_base_and_custom_rules(self) -> None:
+        with tempfile.TemporaryDirectory() as repo_root:
+            with patch("secret_sentinel.cli.get_git_root", return_value=repo_root):
+                with patch("secret_sentinel.cli.scan_paths", return_value=[]) as scan:
+                    self.assertEqual(main(["--diff", "HEAD~1", "--no-ai"]), 0)
+            self.assertEqual(scan.call_args.kwargs["diff_base"], "HEAD~1")
 
     def test_main_git_history_scan_reports_errors(self) -> None:
         """History scan errors should fail explicitly with a generic message."""

@@ -19,6 +19,7 @@ from .scanner import (
     get_staged_content,
     get_staged_paths,
     scan_paths as scan_disk_paths,
+    scan_git_diff,
     scan_git_history,
     scan_staged_files,
     summarize_issues,
@@ -70,6 +71,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--git-history",
         action="store_true",
         help="Scan commits reachable from HEAD for secrets.",
+    )
+    parser.add_argument(
+        "--diff",
+        metavar="BASE",
+        help="Scan added lines in the working tree diff against BASE.",
     )
     parser.add_argument(
         "--all-refs",
@@ -253,6 +259,7 @@ def scan_paths(
     staged: bool,
     debug: bool = False,
     custom_rules: Optional[List[CustomRule]] = None,
+    diff_base: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """Execute secret scan across paths or staged changes, optionally applying AI validation.
 
@@ -261,6 +268,7 @@ def scan_paths(
         no_ai: Whether to skip AI validation.
         staged: Whether to scan git staged changes.
         debug: Whether debug mode is active.
+        diff_base: Optional Git revision for scanning added lines only.
 
     Returns:
         List of verified issue findings.
@@ -276,7 +284,14 @@ def scan_paths(
 
     issues: List[Dict[str, Any]] = []
     active_custom_rules = config.custom_rules if custom_rules is None else custom_rules
-    if staged or not paths:
+    if diff_base is not None:
+        issues = scan_git_diff(
+            diff_base,
+            repo_root,
+            ignore_globs=ignore_globs,
+            custom_rules=active_custom_rules,
+        )
+    elif staged or not paths:
         issues = scan_staged_files(
             ignore_globs=ignore_globs,
             repo_root=repo_root,
@@ -300,7 +315,7 @@ def scan_paths(
     verified: List[Dict[str, Any]] = []
     for source_path, path_issues in issues_by_source.items():
         content: Optional[str] = None
-        if staged or not paths:
+        if staged or (not paths and diff_base is None):
             content = get_staged_content(source_path)
         if content is None:
             disk_path = Path(repo_root) / source_path if not os.path.isabs(source_path) else Path(source_path)
@@ -419,6 +434,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     if args.git_history and (args.paths or args.staged):
         logger.error("--git-history cannot be combined with paths or --staged.")
         return 2
+    if args.diff is not None and (
+        args.paths or args.staged or args.git_history or args.all_refs
+    ):
+        logger.error("--diff cannot be combined with paths, --staged, or --git-history.")
+        return 2
     if args.all_refs and not args.git_history:
         logger.error("--all-refs requires --git-history.")
         return 2
@@ -436,6 +456,19 @@ def main(argv: Optional[List[str]] = None) -> int:
             )
         except (OSError, RuntimeError):
             logger.error("Git history scan failed.")
+            return 1
+    elif args.diff is not None:
+        try:
+            issues = scan_paths(
+                [],
+                args.no_ai,
+                staged=False,
+                debug=args.debug,
+                custom_rules=config.custom_rules,
+                diff_base=args.diff,
+            )
+        except (OSError, RuntimeError, ValueError) as exc:
+            logger.error("Diff scan failed: %s", exc)
             return 1
     else:
         issues = scan_paths(
@@ -476,7 +509,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     should_block = bool(issues and (overall_severity.value >= threshold.value))
 
     history_manager = ScanHistory(repo_root)
-    scan_type = "git-history" if args.git_history else ("staged" if args.staged else "manual")
+    scan_type = (
+        "git-history"
+        if args.git_history
+        else ("diff" if args.diff is not None else ("staged" if args.staged else "manual"))
+    )
     status = "blocked" if should_block else "completed"
     history_manager.record_scan(issues, scan_type=scan_type, status=status)
 

@@ -37,6 +37,7 @@ SUPPRESSION_DIRECTIVE_PATTERN = re.compile(
 )
 SUPPRESSION_EXPIRY_PATTERN = re.compile(r"(?i)\bexpires?\s*[:=]\s*([^\s;,*/]+)")
 SECRET_STRING_PATTERN = re.compile(r"[\"']([A-Za-z0-9+/=_.-]{24,})[\"']")
+DIFF_HUNK_PATTERN = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
 ENTROPY_THRESHOLD = 4.6
 MIN_ENTROPY_LENGTH = 24
 DEFAULT_IGNORE = [
@@ -395,6 +396,90 @@ def scan_git_history(
                 issue["commit"] = commit
                 issues.append(issue)
 
+    return issues
+
+
+def scan_git_diff(
+    base: str,
+    repo_root: str,
+    ignore_globs: Optional[List[str]] = None,
+    custom_rules: Optional[List[CustomRule]] = None,
+) -> List[Dict[str, Any]]:
+    """Scan only added lines in the working tree diff against a Git commit."""
+    if not base or base.startswith("-"):
+        raise ValueError("A valid base commit or ref is required for diff scanning.")
+
+    base_result = _run_git_command(
+        ["rev-parse", "--verify", "--quiet", "--end-of-options", f"{base}^{{commit}}"],
+        cwd=repo_root,
+    )
+    if base_result.returncode != 0:
+        raise ValueError(f"Unable to resolve diff base {base!r} to a commit.")
+    base_commit = base_result.stdout.strip()
+
+    paths_result = _run_git_command(
+        ["diff", "--name-only", "-z", "--diff-filter=ACMRT", base_commit, "--"],
+        cwd=repo_root,
+        text=False,
+    )
+    if paths_result.returncode != 0:
+        raise RuntimeError("Unable to list changed files for diff scanning.")
+
+    active_ignores = ignore_globs or DEFAULT_IGNORE
+    issues: List[Dict[str, Any]] = []
+    for raw_path in paths_result.stdout.split(b"\0"):
+        if not raw_path:
+            continue
+        path = os.fsdecode(raw_path)
+        absolute_path = os.path.join(repo_root, path)
+        if _is_ignored(absolute_path, active_ignores, repo_root):
+            continue
+        if not os.path.isfile(absolute_path):
+            continue
+
+        try:
+            with open(absolute_path, "rb") as handle:
+                data = handle.read()
+        except OSError:
+            continue
+        if not is_text_bytes(data[:2048]):
+            continue
+
+        patch_result = _run_git_command(
+            [
+                "diff",
+                "--unified=0",
+                "--no-color",
+                "--no-ext-diff",
+                base_commit,
+                "--",
+                path,
+            ],
+            cwd=repo_root,
+            text=False,
+        )
+        if patch_result.returncode != 0:
+            raise RuntimeError("Unable to read changed lines for diff scanning.")
+
+        added_lines: set[int] = set()
+        patch_text = patch_result.stdout.decode("utf-8", errors="replace")
+        for line in patch_text.splitlines():
+            hunk = DIFF_HUNK_PATTERN.match(line)
+            if not hunk:
+                continue
+            start = int(hunk.group(1))
+            count = int(hunk.group(2) or 1)
+            added_lines.update(range(start, start + count))
+        if not added_lines:
+            continue
+
+        source = _sanitize_source_path(absolute_path, repo_root)
+        content = data.decode("utf-8", errors="replace")
+        issues.extend(
+            issue
+            for issue in scan_text(content, source, custom_rules=custom_rules)
+            if issue["line"] in added_lines
+        )
     return issues
 
 
