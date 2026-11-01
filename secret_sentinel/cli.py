@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from .ai_validator import validate_issues
+from .baseline import ScanBaseline
 from .config import SecretSentinelConfig
 from .formatters import format_json, format_sarif, format_text
 from .history import ScanHistory
@@ -68,6 +69,17 @@ def build_parser() -> argparse.ArgumentParser:
         "--git-history",
         action="store_true",
         help="Scan commits reachable from HEAD for secrets.",
+    )
+    baseline_group = parser.add_mutually_exclusive_group()
+    baseline_group.add_argument(
+        "--baseline",
+        action="store_true",
+        help="Ignore findings already recorded in .secret-sentinel/baseline.json.",
+    )
+    baseline_group.add_argument(
+        "--update-baseline",
+        action="store_true",
+        help="Record current findings in .secret-sentinel/baseline.json and exit successfully.",
     )
     parser.add_argument(
         "--no-ai",
@@ -309,6 +321,16 @@ def main(argv: Optional[List[str]] = None) -> int:
     setup_logging(debug=args.debug)
     repo_root = get_git_root() or os.getcwd()
 
+    if (args.baseline or args.update_baseline) and (
+        args.history
+        or args.stats
+        or args.clear_history
+        or args.install_hook
+        or args.uninstall_hook
+    ):
+        logger.error("Baseline options can only be used with a scan.")
+        return 2
+
     if args.history or args.stats or args.clear_history:
         history_manager = ScanHistory(repo_root)
 
@@ -376,6 +398,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     if args.git_history and (args.paths or args.staged):
         logger.error("--git-history cannot be combined with paths or --staged.")
         return 2
+    if args.update_baseline and (args.output or args.format != "text"):
+        logger.error("--update-baseline cannot be combined with --format or --output.")
+        return 2
 
     if args.git_history:
         try:
@@ -386,6 +411,32 @@ def main(argv: Optional[List[str]] = None) -> int:
     else:
         issues = scan_paths(args.paths, args.no_ai, staged=args.staged, debug=args.debug)
 
+    if args.update_baseline:
+        try:
+            baseline = ScanBaseline(repo_root)
+            baseline.save(issues)
+        except (OSError, ValueError) as exc:
+            logger.error("Failed to update baseline: %s", exc)
+            return 1
+        print(f"Baseline updated: {len(issues)} finding(s) recorded at {baseline.path}.")
+        print("Secret values are not stored in the baseline.")
+        return 0
+
+    baseline_suppressed = 0
+    if args.baseline:
+        try:
+            baseline = ScanBaseline(repo_root)
+            issues, baseline_suppressed = baseline.filter_issues(issues)
+        except FileNotFoundError:
+            logger.error(
+                "Baseline not found at %s. Run `secret-sentinel --update-baseline` first.",
+                baseline.path,
+            )
+            return 1
+        except (OSError, ValueError) as exc:
+            logger.error("Failed to read baseline: %s", exc)
+            return 1
+
     overall_severity = calculate_overall_severity(issues)
     should_block = bool(issues and (overall_severity.value >= threshold.value))
 
@@ -395,11 +446,17 @@ def main(argv: Optional[List[str]] = None) -> int:
     history_manager.record_scan(issues, scan_type=scan_type, status=status)
 
     if args.format == "json":
-        output_str = format_json(issues, fail_on=threshold)
+        output_str = format_json(
+            issues, fail_on=threshold, baseline_suppressed=baseline_suppressed
+        )
     elif args.format == "sarif":
-        output_str = format_sarif(issues, repo_root=repo_root)
+        output_str = format_sarif(
+            issues, repo_root=repo_root, baseline_suppressed=baseline_suppressed
+        )
     else:
-        output_str = format_text(issues, fail_on=threshold)
+        output_str = format_text(
+            issues, fail_on=threshold, baseline_suppressed=baseline_suppressed
+        )
 
     if args.output:
         try:

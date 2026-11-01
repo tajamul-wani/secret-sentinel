@@ -10,6 +10,7 @@ from .utils import sanitize_snippet
 def format_text(
     issues: List[Dict[str, Any]],
     fail_on: Optional[SeverityLevel] = None,
+    baseline_suppressed: int = 0,
 ) -> str:
     """Format scan issues into human-readable text.
 
@@ -21,7 +22,10 @@ def format_text(
         Formatted summary string.
     """
     if not issues:
-        return "secret-sentinel scan passed."
+        message = "secret-sentinel scan passed."
+        if baseline_suppressed:
+            message += f" ({baseline_suppressed} baseline finding(s) ignored)."
+        return message
 
     lines = [f"Detected potential secrets ({len(issues)}):"]
     for issue in issues:
@@ -34,6 +38,9 @@ def format_text(
         if issue.get("commit"):
             entry += f" (commit {str(issue['commit'])[:12]})"
         lines.append(entry)
+
+    if baseline_suppressed:
+        lines.append(f"Baseline findings ignored: {baseline_suppressed}")
 
     overall_severity = calculate_overall_severity(issues)
     lines.append(f"Overall severity: {overall_severity}")
@@ -51,6 +58,7 @@ def format_text(
 def format_json(
     issues: List[Dict[str, Any]],
     fail_on: Optional[SeverityLevel] = None,
+    baseline_suppressed: int = 0,
 ) -> str:
     """Format scan issues into machine-readable JSON without leaking credentials.
 
@@ -96,12 +104,17 @@ def format_json(
         "total_issues": len(issues),
         "overall_severity": overall_severity.name,
         "fail_on": threshold.name,
+        "baseline_suppressed": baseline_suppressed,
         "issues": sanitized_issues,
     }
     return json.dumps(report, indent=2)
 
 
-def format_sarif(issues: List[Dict[str, Any]], repo_root: Optional[str] = None) -> str:
+def format_sarif(
+    issues: List[Dict[str, Any]],
+    repo_root: Optional[str] = None,
+    baseline_suppressed: int = 0,
+) -> str:
     """Format scan issues into SARIF v2.1.0 format for GitHub Code Scanning.
 
     Args:
@@ -176,4 +189,8 @@ def format_sarif(issues: List[Dict[str, Any]], repo_root: Optional[str] = None) 
             }
         ]
     }
+    if baseline_suppressed:
+        sarif_log["runs"][0]["properties"] = {
+            "baselineSuppressed": baseline_suppressed
+        }
     return json.dumps(sarif_log, indent=2)

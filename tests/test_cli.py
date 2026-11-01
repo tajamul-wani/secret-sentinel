@@ -48,6 +48,13 @@ class TestCLI(unittest.TestCase):
         args = parse_args(["--git-history"])
         self.assertTrue(args.git_history)
 
+    def test_parse_args_for_baseline_modes(self) -> None:
+        """Parse baseline checking and initialization modes."""
+        self.assertTrue(parse_args(["--baseline"]).baseline)
+        self.assertTrue(parse_args(["--update-baseline"]).update_baseline)
+        with self.assertRaises(SystemExit):
+            parse_args(["--baseline", "--update-baseline"])
+
     def test_parse_args_for_file_paths(self) -> None:
         """Test positional path arguments."""
         args = parse_args(["src", "tests"])
@@ -166,6 +173,96 @@ class TestCLI(unittest.TestCase):
             with patch("secret_sentinel.cli.get_git_root", return_value=None):
                 exit_code = main(["--no-ai"])
                 self.assertEqual(exit_code, 1)
+
+    def test_main_update_baseline_records_findings_without_failing(self) -> None:
+        """Baseline initialization records current findings without blocking."""
+        issue = {
+            "source": "config.py",
+            "line": 2,
+            "matcher": "AWS Secret Access Key",
+            "value": DUMMY_AWS,
+            "snippet": f'key = "{DUMMY_AWS}"',
+            "confidence": "high",
+            "severity": "CRITICAL",
+        }
+        with tempfile.TemporaryDirectory() as repo_root:
+            with patch.dict(
+                os.environ, {"SECRET_SENTINEL_BASELINE_KEY": "test-key-" + "x" * 32}
+            ):
+                with patch("secret_sentinel.cli.get_git_root", return_value=repo_root):
+                    with patch("secret_sentinel.cli.scan_paths", return_value=[issue]):
+                        self.assertEqual(main(["--update-baseline", "--no-ai"]), 0)
+            baseline_path = os.path.join(
+                repo_root, ".secret-sentinel", "baseline.json"
+            )
+            with open(baseline_path, "r", encoding="utf-8") as handle:
+                baseline_contents = handle.read()
+        self.assertNotIn(DUMMY_AWS, baseline_contents)
+
+    def test_main_baseline_filters_known_findings(self) -> None:
+        """Baseline scan exits successfully when all findings are already known."""
+        issue = {
+            "source": "config.py",
+            "line": 2,
+            "matcher": "AWS Secret Access Key",
+            "value": DUMMY_AWS,
+            "snippet": f'key = "{DUMMY_AWS}"',
+            "confidence": "high",
+            "severity": "CRITICAL",
+        }
+        with tempfile.TemporaryDirectory() as repo_root:
+            with patch.dict(
+                os.environ, {"SECRET_SENTINEL_BASELINE_KEY": "test-key-" + "x" * 32}
+            ):
+                with patch("secret_sentinel.cli.get_git_root", return_value=repo_root):
+                    with patch("secret_sentinel.cli.scan_paths", return_value=[issue]):
+                        self.assertEqual(main(["--update-baseline", "--no-ai"]), 0)
+                        self.assertEqual(main(["--baseline", "--no-ai"]), 0)
+
+    def test_main_baseline_reports_new_findings(self) -> None:
+        """A finding absent from the baseline still blocks the scan."""
+        original = {
+            "source": "config.py",
+            "line": 2,
+            "matcher": "AWS Secret Access Key",
+            "value": DUMMY_AWS,
+            "snippet": f'key = "{DUMMY_AWS}"',
+            "confidence": "high",
+            "severity": "CRITICAL",
+        }
+        new_issue = dict(original, value="AKIA" + "FEDCBA0987654321")
+        with tempfile.TemporaryDirectory() as repo_root:
+            with patch.dict(
+                os.environ, {"SECRET_SENTINEL_BASELINE_KEY": "test-key-" + "x" * 32}
+            ):
+                with patch("secret_sentinel.cli.get_git_root", return_value=repo_root):
+                    with patch("secret_sentinel.cli.scan_paths", return_value=[original]):
+                        self.assertEqual(main(["--update-baseline", "--no-ai"]), 0)
+                    with patch(
+                        "secret_sentinel.cli.scan_paths",
+                        return_value=[original, new_issue],
+                    ):
+                        self.assertEqual(main(["--baseline", "--no-ai"]), 1)
+
+    def test_main_baseline_requires_existing_file(self) -> None:
+        """Baseline checks fail with an actionable message when no baseline exists."""
+        with tempfile.TemporaryDirectory() as repo_root:
+            with patch.dict(
+                os.environ, {"SECRET_SENTINEL_BASELINE_KEY": "test-key-" + "x" * 32}
+            ):
+                with patch("secret_sentinel.cli.get_git_root", return_value=repo_root):
+                    self.assertEqual(main(["--baseline", "--no-ai"]), 1)
+
+    def test_main_baseline_requires_key(self) -> None:
+        """Baseline operations fail clearly when the key is not configured."""
+        with tempfile.TemporaryDirectory() as repo_root:
+            with patch.dict(os.environ, {"SECRET_SENTINEL_BASELINE_KEY": ""}):
+                with patch("secret_sentinel.cli.get_git_root", return_value=repo_root):
+                    self.assertEqual(main(["--baseline", "--no-ai"]), 1)
+
+    def test_main_baseline_rejects_non_scan_options(self) -> None:
+        """Baseline modes should not be silently ignored by other CLI commands."""
+        self.assertEqual(main(["--baseline", "--history"]), 2)
 
     def test_main_git_history_scan_uses_threshold_and_records_history(self) -> None:
         """Git history mode should scan, format, and record its own scan type."""

@@ -86,6 +86,34 @@ secret-sentinel --staged --fail-on HIGH
 secret-sentinel --staged --fail-on LOW
 ```
 
+### Baseline Existing Findings
+
+If a repository already contains findings, record them once and then check only
+for newly introduced findings:
+
+```bash
+# Capture findings from the selected scan (here, the whole working tree)
+secret-sentinel --update-baseline .
+
+# Later scans ignore matching baseline findings and fail on new ones
+secret-sentinel --baseline .
+```
+
+The baseline is stored at `.secret-sentinel/baseline.json`. It contains
+HMAC-SHA-256 fingerprints of each finding's path, rule, and detected value—not
+the secret value itself. Baseline operations require the same independently
+generated key in `SECRET_SENTINEL_BASELINE_KEY` on every machine and CI job that
+uses the baseline. Generate a key with
+`python -c "import secrets; print(secrets.token_hex(32))"` and store it as a
+local environment variable or CI secret; never commit it. The keyed fingerprints
+prevent offline guessing from the committed baseline and prevent contributors
+without the key from adding valid suppressions.
+
+`--update-baseline` intentionally replaces the baseline with findings from that
+scan, so review new findings before refreshing it. Commit the baseline file if
+the team should share it. Baseline checks also work with staged scans and
+`--git-history`.
+
 ### Output Formats
 
 Export scan results in different formats for terminal view, script parsing, or CI/CD integration:

@@ -92,6 +92,10 @@ class TestFormatters(unittest.TestCase):
         self.assertEqual(len(data["issues"]), 1)
         self.assertIn("[REDACTED]", data["issues"][0]["snippet"])
 
+    def test_format_json_includes_baseline_suppressed_count(self) -> None:
+        data = json.loads(format_json([], baseline_suppressed=2))
+        self.assertEqual(data["baseline_suppressed"], 2)
+
     def test_format_json_includes_commit_provenance(self) -> None:
         """JSON output should preserve commit provenance."""
         issue = dict(self.sample_issues[0], commit="1234567890abcdef")
@@ -132,6 +136,10 @@ class TestFormatters(unittest.TestCase):
         data = json.loads(format_sarif([issue]))
         result = data["runs"][0]["results"][0]
         self.assertEqual(result["properties"]["commit"], "1234567890abcdef")
+
+    def test_format_sarif_includes_baseline_suppressed_count(self) -> None:
+        data = json.loads(format_sarif([], baseline_suppressed=2))
+        self.assertEqual(data["runs"][0]["properties"]["baselineSuppressed"], 2)
 
 
 if __name__ == "__main__":
