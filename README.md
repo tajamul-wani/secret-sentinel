@@ -80,6 +80,15 @@ Each detected secret is assigned a severity level based on its type:
 
 The overall severity of a scan is determined by the highest severity issue found.
 
+### Responding to Findings
+
+Text, JSON, and SARIF reports include remediation guidance for detected
+credential types. If a finding may be real, revoke or rotate the credential
+first, investigate provider activity for misuse, and move any replacement into
+a secrets manager. Removing a value from the working tree does not invalidate
+it; history cleanup should follow revocation and may require coordination with
+repository collaborators.
+
 ### Configurable Failure Threshold
 
 Configure which severity level blocks commits or causes CI to fail:
