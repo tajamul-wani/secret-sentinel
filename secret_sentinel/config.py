@@ -1,10 +1,22 @@
 """Configuration manager for Secret Sentinel."""
 
 import configparser
+import re
+from dataclasses import dataclass
 from pathlib import Path
-from typing import List
+from typing import List, Optional, Pattern
 
 from .risk_scoring import SeverityLevel
+
+
+@dataclass(frozen=True)
+class CustomRule:
+    """A user-defined detector pattern and its severity."""
+
+    name: str
+    pattern: Pattern[str]
+    severity: SeverityLevel
+
 
 DEFAULT_IGNORE = [
     "__pycache__/*",
@@ -31,6 +43,7 @@ class SecretSentinelConfig:
         ai_enabled: bool,
         fail_on: SeverityLevel = SeverityLevel.LOW,
         ai_cloud_enabled: bool = False,
+        custom_rules: Optional[List[CustomRule]] = None,
     ) -> None:
         """Initialize configuration object.
 
@@ -44,6 +57,7 @@ class SecretSentinelConfig:
         self.ai_enabled = ai_enabled
         self.ai_cloud_enabled = ai_cloud_enabled
         self.fail_on = fail_on
+        self.custom_rules = custom_rules or []
 
     @classmethod
     def load(
@@ -68,6 +82,7 @@ class SecretSentinelConfig:
         ai_enabled = False
         ai_cloud_enabled = False
         fail_on = SeverityLevel.LOW
+        custom_rules: List[CustomRule] = []
 
         root_path = Path(repo_root)
 
@@ -86,7 +101,8 @@ class SecretSentinelConfig:
         # Parse .secret-sentinel.ini if available
         config_path = root_path / file_name
         if config_path.is_file():
-            parser = configparser.ConfigParser()
+            parser = configparser.ConfigParser(interpolation=None)
+            parser.optionxform = str
             parser.read(config_path)
             if parser.has_section("secret-sentinel"):
                 raw_ignore = parser.get("secret-sentinel", "ignore_paths", fallback="")
@@ -103,10 +119,31 @@ class SecretSentinelConfig:
                     fail_on = SeverityLevel[raw_fail_on]
                 except KeyError:
                     fail_on = SeverityLevel.LOW
+            if parser.has_section("custom_rules"):
+                for name, definition in parser.items("custom_rules"):
+                    severity_text, separator, pattern_text = definition.partition("|")
+                    if not separator or not severity_text.strip() or not pattern_text.strip():
+                        raise ValueError(
+                            f"Custom rule {name!r} must use SEVERITY | REGEX format."
+                        )
+                    try:
+                        severity = SeverityLevel[severity_text.strip().upper()]
+                    except KeyError as exc:
+                        raise ValueError(
+                            f"Custom rule {name!r} has an invalid severity."
+                        ) from exc
+                    try:
+                        pattern = re.compile(pattern_text.strip())
+                    except re.error as exc:
+                        raise ValueError(
+                            f"Custom rule {name!r} has an invalid regular expression: {exc}"
+                        ) from exc
+                    custom_rules.append(CustomRule(name.strip(), pattern, severity))
 
         return cls(
             ignore_globs,
             ai_enabled,
             ai_cloud_enabled=ai_cloud_enabled,
             fail_on=fail_on,
+            custom_rules=custom_rules,
         )
