@@ -164,9 +164,10 @@ The included workflow tests the package, scans the repository, and uploads a
 SARIF report to GitHub Code Scanning. To make it ignore known findings, add the
 same key used to create the baseline as a repository Actions secret named
 `SECRET_SENTINEL_BASELINE_KEY` (Settings → Secrets and variables → Actions).
-The key is only passed to trusted pushes on `main`; pull requests are scanned
-without a baseline so untrusted PR code never receives the key. If the key or
-baseline file is unavailable on a push, the workflow scans without a baseline.
+The key is only passed to trusted pushes on `main`; pull requests scan added and
+modified lines against their base branch without a baseline, so untrusted PR
+code never receives the key. If the key or baseline file is unavailable on a
+push, the workflow scans without a baseline.
 
 ### Output Formats
 
