@@ -3,6 +3,7 @@
 import json
 from typing import Any, Dict, List, Optional
 
+from .remediation import get_remediation
 from .risk_scoring import SeverityLevel, calculate_overall_severity
 from .utils import sanitize_snippet
 
@@ -38,6 +39,10 @@ def format_text(
         if issue.get("commit"):
             entry += f" (commit {str(issue['commit'])[:12]})"
         lines.append(entry)
+        lines.extend(
+            f"  Remediation: {step}"
+            for step in get_remediation(str(issue.get("matcher", "")))
+        )
 
     if baseline_suppressed:
         lines.append(f"Baseline findings ignored: {baseline_suppressed}")
@@ -97,6 +102,7 @@ def format_json(
             item["entropy"] = issue.get("entropy")
         if issue.get("commit"):
             item["commit"] = issue.get("commit")
+        item["remediation"] = get_remediation(str(issue.get("matcher", "")))
         sanitized_issues.append(item)
 
     report = {
@@ -170,6 +176,7 @@ def format_sarif(
         }
         if issue.get("commit"):
             result["properties"] = {"commit": issue["commit"]}
+        result.setdefault("properties", {})["remediation"] = get_remediation(rule_id)
         sarif_results.append(result)
 
     sarif_log = {

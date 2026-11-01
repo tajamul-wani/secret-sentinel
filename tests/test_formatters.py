@@ -38,6 +38,9 @@ class TestFormatters(unittest.TestCase):
         self.assertIn("[REDACTED]", result)
         self.assertNotIn(DUMMY_AWS, result)
         self.assertIn("CRITICAL", result)
+        self.assertIn("Deactivate the access key in IAM", result)
+        self.assertIn("Review CloudTrail", result)
+        self.assertIn("remove the exposed value from repository history", result)
 
     def test_format_text_includes_commit_provenance(self) -> None:
         """Text output should include abbreviated commit provenance when present."""
@@ -91,6 +94,8 @@ class TestFormatters(unittest.TestCase):
         self.assertEqual(data["overall_severity"], "CRITICAL")
         self.assertEqual(len(data["issues"]), 1)
         self.assertIn("[REDACTED]", data["issues"][0]["snippet"])
+        self.assertIn("Deactivate the access key in IAM", data["issues"][0]["remediation"][0])
+        self.assertNotIn(DUMMY_AWS, raw_json)
 
     def test_format_json_includes_baseline_suppressed_count(self) -> None:
         data = json.loads(format_json([], baseline_suppressed=2))
@@ -129,6 +134,7 @@ class TestFormatters(unittest.TestCase):
             result["locations"][0]["physicalLocation"]["region"]["startLine"],
             15,
         )
+        self.assertIn("Deactivate the access key in IAM", result["properties"]["remediation"][0])
 
     def test_format_sarif_includes_commit_provenance(self) -> None:
         """SARIF output should preserve commit provenance in result properties."""
@@ -140,6 +146,12 @@ class TestFormatters(unittest.TestCase):
     def test_format_sarif_includes_baseline_suppressed_count(self) -> None:
         data = json.loads(format_sarif([], baseline_suppressed=2))
         self.assertEqual(data["runs"][0]["properties"]["baselineSuppressed"], 2)
+
+    def test_unknown_matcher_gets_generic_remediation(self) -> None:
+        issue = dict(self.sample_issues[0], matcher="Organization Custom Token")
+        data = json.loads(format_json([issue]))
+        steps = data["issues"][0]["remediation"]
+        self.assertTrue(any("revoke or rotate it with its issuer" in step for step in steps))
 
 
 if __name__ == "__main__":
