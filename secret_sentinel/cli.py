@@ -70,6 +70,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Scan commits reachable from HEAD for secrets.",
     )
+    parser.add_argument(
+        "--all-refs",
+        action="store_true",
+        help="With --git-history, include commits reachable from all local Git refs.",
+    )
     baseline_group = parser.add_mutually_exclusive_group()
     baseline_group.add_argument(
         "--baseline",
@@ -398,13 +403,20 @@ def main(argv: Optional[List[str]] = None) -> int:
     if args.git_history and (args.paths or args.staged):
         logger.error("--git-history cannot be combined with paths or --staged.")
         return 2
+    if args.all_refs and not args.git_history:
+        logger.error("--all-refs requires --git-history.")
+        return 2
     if args.update_baseline and (args.output or args.format != "text"):
         logger.error("--update-baseline cannot be combined with --format or --output.")
         return 2
 
     if args.git_history:
         try:
-            issues = scan_git_history(repo_root, ignore_globs=config.ignore_globs)
+            issues = scan_git_history(
+                repo_root,
+                ignore_globs=config.ignore_globs,
+                all_refs=args.all_refs,
+            )
         except (OSError, RuntimeError):
             logger.error("Git history scan failed.")
             return 1

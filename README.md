@@ -47,11 +47,17 @@ Scan commit history reachable from the current `HEAD`:
 ```bash
 secret-sentinel --git-history
 secret-sentinel --git-history --format sarif --output history-results.sarif
+
+# Include local branches, remote-tracking refs, and tags
+secret-sentinel --git-history --all-refs
 ```
 
 The history scan includes commits in the current branch's ancestry, including
 commits that were later removed from the working tree. It does not scan commits
 that are only reachable from other local branches or remote-tracking refs.
+Use `--all-refs` to include commits reachable from any local Git ref, including
+branches, remote-tracking refs, and tags. Remote refs are scanned only if they
+have already been fetched into the local repository.
 Findings identify the earliest commit and file where a match appears. Configured
 ignore paths apply, binary files are skipped, and AI validation is not used.
 Scanning a long history can take time. This reports findings; it does not
