@@ -38,9 +38,31 @@ class TestFormatters(unittest.TestCase):
         self.assertIn("[REDACTED]", result)
         self.assertNotIn(DUMMY_AWS, result)
         self.assertIn("CRITICAL", result)
+        self.assertIn("Why flagged: A built-in secret pattern matched.", result)
+        self.assertIn("Confidence: high.", result)
         self.assertIn("Deactivate the access key in IAM", result)
         self.assertIn("Review CloudTrail", result)
         self.assertIn("remove the exposed value from repository history", result)
+
+    def test_format_text_explains_entropy_findings(self) -> None:
+        """Text output should explain entropy signals and their confidence."""
+        issue = {
+            "source": "app.py",
+            "line": 1,
+            "matcher": "High entropy string",
+            "value": "randomStr1234567890",
+            "snippet": 'token = "randomStr1234567890"',
+            "confidence": "medium",
+            "reason": "entropy",
+            "severity": "MEDIUM",
+        }
+        result = format_text([issue])
+        self.assertIn(
+            "Why flagged: A secret-related keyword appeared beside a high-entropy string.",
+            result,
+        )
+        self.assertIn("Confidence: medium.", result)
+        self.assertNotIn(issue["value"], result)
 
     def test_format_text_includes_commit_provenance(self) -> None:
         """Text output should include abbreviated commit provenance when present."""
@@ -94,8 +116,31 @@ class TestFormatters(unittest.TestCase):
         self.assertEqual(data["overall_severity"], "CRITICAL")
         self.assertEqual(len(data["issues"]), 1)
         self.assertIn("[REDACTED]", data["issues"][0]["snippet"])
+        self.assertEqual(data["issues"][0]["reason"], "pattern")
+        self.assertEqual(
+            data["issues"][0]["explanation"],
+            "A built-in secret pattern matched.",
+        )
         self.assertIn("Deactivate the access key in IAM", data["issues"][0]["remediation"][0])
         self.assertNotIn(DUMMY_AWS, raw_json)
+
+    def test_format_json_sanitizes_unknown_detection_reason(self) -> None:
+        """Unknown reason metadata should not leak into JSON reports."""
+        issue = dict(
+            self.sample_issues[0],
+            confidence=DUMMY_AWS,
+            reason=DUMMY_AWS,
+        )
+        raw_json = format_json([issue])
+        data = json.loads(raw_json)
+
+        self.assertNotIn(DUMMY_AWS, raw_json)
+        self.assertEqual(data["issues"][0]["confidence"], "not specified")
+        self.assertEqual(data["issues"][0]["reason"], "unknown")
+        self.assertEqual(
+            data["issues"][0]["explanation"],
+            "A configured detector identified a potential secret.",
+        )
 
     def test_format_json_includes_baseline_suppressed_count(self) -> None:
         data = json.loads(format_json([], baseline_suppressed=2))
@@ -133,6 +178,14 @@ class TestFormatters(unittest.TestCase):
         self.assertEqual(
             result["locations"][0]["physicalLocation"]["region"]["startLine"],
             15,
+        )
+        self.assertEqual(result["properties"]["confidence"], "high")
+        self.assertEqual(result["properties"]["reason"], "pattern")
+        self.assertIn("A built-in secret pattern matched.", result["message"]["text"])
+        self.assertIn("Confidence: high.", result["message"]["text"])
+        self.assertEqual(
+            result["properties"]["explanation"],
+            "A built-in secret pattern matched.",
         )
         self.assertIn("Deactivate the access key in IAM", result["properties"]["remediation"][0])
 

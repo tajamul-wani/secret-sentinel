@@ -213,6 +213,11 @@ secret-sentinel . --format json
 secret-sentinel . --format sarif --output results.sarif
 ```
 
+Text, JSON, and SARIF findings include a short explanation of the detection
+signal and its confidence where available. Entropy-based findings explain that
+a secret-related keyword and a high-entropy string were found together.
+Reported snippets remain redacted.
+
 ### Inline Ignore Directives
 
 Suppress false positives or intentional test fixtures directly in source code:
