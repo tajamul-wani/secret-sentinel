@@ -8,6 +8,35 @@ from .risk_scoring import SeverityLevel, calculate_overall_severity, get_issue_s
 from .utils import sanitize_snippet
 
 
+_DETECTION_EXPLANATIONS = {
+    "pattern": ("pattern", "A built-in secret pattern matched."),
+    "custom-pattern": ("custom-pattern", "A configured custom rule matched."),
+    "entropy": (
+        "entropy",
+        "A secret-related keyword appeared beside a high-entropy string.",
+    ),
+}
+_CONFIDENCE_LEVELS = {"high", "medium", "low"}
+
+
+def _get_detection_details(issue: Dict[str, Any]) -> tuple[str, str]:
+    """Return a static, secret-free detection reason and explanation."""
+    reason = issue.get("reason")
+    if isinstance(reason, str):
+        details = _DETECTION_EXPLANATIONS.get(reason)
+        if details is not None:
+            return details
+    return "unknown", "A configured detector identified a potential secret."
+
+
+def _get_confidence(issue: Dict[str, Any]) -> str:
+    """Return a supported confidence label, or a safe unspecified value."""
+    confidence = issue.get("confidence")
+    if isinstance(confidence, str) and confidence.lower() in _CONFIDENCE_LEVELS:
+        return confidence.lower()
+    return "not specified"
+
+
 def format_text(
     issues: List[Dict[str, Any]],
     fail_on: Optional[SeverityLevel] = None,
@@ -39,6 +68,11 @@ def format_text(
         if issue.get("commit"):
             entry += f" (commit {str(issue['commit'])[:12]})"
         lines.append(entry)
+        _, explanation = _get_detection_details(issue)
+        lines.append(
+            f"  Why flagged: {explanation} "
+            f"Confidence: {_get_confidence(issue)}."
+        )
         lines.extend(
             f"  Remediation: {step}"
             for step in get_remediation(str(issue.get("matcher", "")))
@@ -89,14 +123,17 @@ def format_json(
         raw_snippet = str(issue.get("snippet", ""))
         secret_val = str(issue.get("value", ""))
         safe_snippet = sanitize_snippet(raw_snippet, secret_val)
+        reason, explanation = _get_detection_details(issue)
 
         item = {
             "source": issue.get("source"),
             "line": issue.get("line"),
             "matcher": issue.get("matcher"),
             "snippet": safe_snippet,
-            "confidence": issue.get("confidence"),
+            "confidence": _get_confidence(issue),
             "severity": issue.get("severity"),
+            "reason": reason,
+            "explanation": explanation,
         }
         if issue.get("entropy") is not None:
             item["entropy"] = issue.get("entropy")
@@ -153,12 +190,17 @@ def format_sarif(
         raw_snippet = str(issue.get("snippet", ""))
         secret_val = str(issue.get("value", ""))
         safe_snippet = sanitize_snippet(raw_snippet, secret_val)
+        reason, explanation = _get_detection_details(issue)
+        confidence = _get_confidence(issue)
 
         result = {
             "ruleId": rule_id,
             "level": sarif_level,
             "message": {
-                "text": f"Potential {rule_id} found: {safe_snippet}"
+                "text": (
+                    f"Potential {rule_id} found: {safe_snippet} "
+                    f"{explanation} Confidence: {confidence}."
+                )
             },
             "locations": [
                 {
@@ -174,9 +216,14 @@ def format_sarif(
                 }
             ]
         }
+        result["properties"] = {
+            "confidence": confidence,
+            "reason": reason,
+            "explanation": explanation,
+        }
         if issue.get("commit"):
-            result["properties"] = {"commit": issue["commit"]}
-        result.setdefault("properties", {})["remediation"] = get_remediation(rule_id)
+            result["properties"]["commit"] = issue["commit"]
+        result["properties"]["remediation"] = get_remediation(rule_id)
         sarif_results.append(result)
 
     sarif_log = {
