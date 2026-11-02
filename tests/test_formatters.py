@@ -28,9 +28,9 @@ class TestFormatters(unittest.TestCase):
         ]
 
     def test_format_text_clean(self) -> None:
-        """Text format with no issues should report scan passed."""
+        """Text format should give a concise positive message for a clean scan."""
         result = format_text([])
-        self.assertEqual(result, "secret-sentinel scan passed.")
+        self.assertEqual(result, "All clear! No potential secrets found.")
 
     def test_format_text_with_issues(self) -> None:
         """Text format should list issues with secrets redacted."""
