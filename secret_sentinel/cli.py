@@ -4,6 +4,7 @@ import argparse
 import configparser
 import logging
 import os
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -135,6 +136,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Clear all scan history.",
     )
     parser.add_argument(
+        "--doctor",
+        action="store_true",
+        help="Check repository, configuration, hook, and optional baseline setup.",
+    )
+    parser.add_argument(
         "--fail-on",
         choices=["LOW", "MEDIUM", "HIGH", "CRITICAL"],
         default=None,
@@ -253,6 +259,77 @@ def uninstall_git_hook(repo_root: str) -> None:
         sys.exit(1)
 
 
+def _get_git_hook_path(repo_root: str) -> Path:
+    """Return the repository's standard pre-commit hook path."""
+    result = subprocess.run(
+        ["git", "-C", repo_root, "rev-parse", "--git-path", "hooks/pre-commit"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode == 0 and result.stdout.strip():
+        hook_path = Path(result.stdout.strip())
+        if not hook_path.is_absolute():
+            hook_path = Path(repo_root) / hook_path
+        return hook_path
+    return Path(repo_root) / ".git" / "hooks" / "pre-commit"
+
+
+def run_doctor(repo_root: Optional[str]) -> int:
+    """Report setup health without changing repository files or showing secrets."""
+    print("Secret Sentinel doctor")
+    if repo_root is None:
+        print("[FAIL] Git repository: not found")
+        print("Run this command from inside a Git repository.")
+        return 1
+
+    print("[ OK ] Git repository: found")
+    try:
+        config = SecretSentinelConfig.load(repo_root)
+    except (OSError, configparser.Error, ValueError):
+        print("[FAIL] Configuration: could not be loaded")
+        print("Review .secret-sentinel.ini and .secretignore, then run doctor again.")
+        return 1
+
+    config_path = Path(repo_root) / ".secret-sentinel.ini"
+    config_status = "valid" if config_path.is_file() else "defaults active"
+    print(f"[ OK ] Configuration: {config_status}")
+    hook_path = _get_git_hook_path(repo_root)
+    if hook_path.is_symlink():
+        print("[WARN] Pre-commit hook: symbolic link present; left unchecked")
+    elif hook_path.is_file():
+        try:
+            with hook_path.open("r", encoding="utf-8", errors="replace") as handle:
+                managed = HOOK_MARKER in handle.read()
+        except OSError:
+            print("[WARN] Pre-commit hook: could not be checked")
+        else:
+            if managed:
+                print("[ OK ] Pre-commit hook: installed")
+            else:
+                print("[WARN] Pre-commit hook: another hook is present")
+    else:
+        print("[WARN] Pre-commit hook: not installed (optional)")
+
+    baseline_path = Path(repo_root) / ScanBaseline.DEFAULT_PATH
+    if baseline_path.is_file():
+        key = os.environ.get(ScanBaseline.KEY_ENVIRONMENT_VARIABLE, "")
+        if len(key.encode("utf-8")) >= ScanBaseline.MINIMUM_KEY_LENGTH:
+            print("[ OK ] Baseline: present and key configured")
+        else:
+            print("[WARN] Baseline: present; baseline key is not configured")
+    else:
+        print("[INFO] Baseline: not configured (optional)")
+
+    if config.ai_enabled:
+        validation = "enabled (cloud opt-in)" if config.ai_cloud_enabled else "enabled (local)"
+    else:
+        validation = "disabled (optional)"
+    print(f"[INFO] AI validation: {validation}")
+    print("Configuration checks passed.")
+    return 0
+
+
 def scan_paths(
     paths: List[str],
     no_ai: bool,
@@ -351,7 +428,29 @@ def main(argv: Optional[List[str]] = None) -> int:
     """
     args = parse_args(argv)
     setup_logging(debug=args.debug)
-    repo_root = get_git_root() or os.getcwd()
+    git_root = get_git_root()
+    repo_root = git_root or os.getcwd()
+
+    if args.doctor:
+        if (
+            args.paths
+            or args.staged
+            or args.git_history
+            or args.diff is not None
+            or args.all_refs
+            or args.baseline
+            or args.update_baseline
+            or args.history
+            or args.stats
+            or args.clear_history
+            or args.install_hook
+            or args.uninstall_hook
+            or args.output
+            or args.format != "text"
+        ):
+            logger.error("--doctor cannot be combined with scan or management options.")
+            return 2
+        return run_doctor(git_root)
 
     if (args.baseline or args.update_baseline) and (
         args.history

@@ -3,6 +3,8 @@
 import os
 import tempfile
 import unittest
+from contextlib import redirect_stdout
+from io import StringIO
 from unittest.mock import MagicMock, patch
 
 from secret_sentinel.cli import (
@@ -355,6 +357,41 @@ class TestCLI(unittest.TestCase):
             with patch("secret_sentinel.cli.get_git_root", return_value=tmpdir):
                 self.assertEqual(main(["--install-hook"]), 0)
                 self.assertEqual(main(["--uninstall-hook"]), 0)
+
+    def test_main_doctor_reports_missing_repository(self) -> None:
+        """Doctor should explain when it is run outside a Git repository."""
+        output = StringIO()
+        with patch("secret_sentinel.cli.get_git_root", return_value=None):
+            with redirect_stdout(output):
+                self.assertEqual(main(["--doctor"]), 1)
+        self.assertIn("Git repository: not found", output.getvalue())
+
+    def test_main_doctor_reports_safe_repository_status(self) -> None:
+        """Doctor should report optional setup without changing repository files."""
+        with tempfile.TemporaryDirectory() as repo_root:
+            os.makedirs(os.path.join(repo_root, ".git", "hooks"))
+            output = StringIO()
+            with patch("secret_sentinel.cli.get_git_root", return_value=repo_root):
+                with redirect_stdout(output):
+                    self.assertEqual(main(["--doctor"]), 0)
+            report = output.getvalue()
+            self.assertIn("Configuration: defaults active", report)
+            self.assertIn("Pre-commit hook: not installed (optional)", report)
+            self.assertIn("Baseline: not configured (optional)", report)
+            self.assertFalse(os.path.exists(os.path.join(repo_root, ".secret-sentinel.ini")))
+            self.assertFalse(os.path.exists(os.path.join(repo_root, ".git", "hooks", "pre-commit")))
+
+    def test_main_doctor_hides_configuration_errors(self) -> None:
+        """Doctor should not print configuration contents when parsing fails."""
+        with tempfile.TemporaryDirectory() as repo_root:
+            with open(os.path.join(repo_root, ".secret-sentinel.ini"), "w", encoding="utf-8") as handle:
+                handle.write("[custom_rules]\nBroken = HIGH | [\n")
+            output = StringIO()
+            with patch("secret_sentinel.cli.get_git_root", return_value=repo_root):
+                with redirect_stdout(output):
+                    self.assertEqual(main(["--doctor"]), 1)
+            self.assertIn("Configuration: could not be loaded", output.getvalue())
+            self.assertNotIn("HIGH | [", output.getvalue())
 
     def test_cli_scan_paths_execution(self) -> None:
         """Test cli.scan_paths with debug and no-ai flags."""
