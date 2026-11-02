@@ -96,6 +96,19 @@ Skip AI validation:
 secret-sentinel --staged --no-ai
 ```
 
+Check the setup without changing repository files:
+
+```bash
+secret-sentinel --doctor
+```
+
+The diagnostic reports Git repository, configuration, pre-commit hook, optional
+baseline, and AI-validation status. It does not display secret values. Missing
+optional setup is reported as a warning; the command fails if it is run outside
+a Git repository or the configuration cannot be loaded.
+
+Successful text scans report: `All clear! No potential secrets found.`
+
 ### Risk Scoring
 
 Each detected secret is assigned a severity level based on its type:
