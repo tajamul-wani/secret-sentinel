@@ -393,6 +393,70 @@ class TestCLI(unittest.TestCase):
             self.assertIn("Configuration: could not be loaded", output.getvalue())
             self.assertNotIn("HIGH | [", output.getvalue())
 
+    def test_main_init_requires_confirmation_non_interactively(self) -> None:
+        """Init should not make changes without --yes in non-interactive use."""
+        with tempfile.TemporaryDirectory() as repo_root:
+            hooks_dir = os.path.join(repo_root, ".git", "hooks")
+            os.makedirs(hooks_dir)
+            with patch("secret_sentinel.cli.get_git_root", return_value=repo_root):
+                with patch("secret_sentinel.cli.sys.stdin") as stdin:
+                    stdin.isatty.return_value = False
+                    self.assertEqual(main(["--init"]), 2)
+            self.assertFalse(os.path.exists(os.path.join(hooks_dir, "pre-commit")))
+
+    def test_main_init_installs_hook_after_confirmation(self) -> None:
+        """Init should install its hook after explicit non-interactive confirmation."""
+        with tempfile.TemporaryDirectory() as repo_root:
+            hooks_dir = os.path.join(repo_root, ".git", "hooks")
+            os.makedirs(hooks_dir)
+            with patch("secret_sentinel.cli.get_git_root", return_value=repo_root):
+                self.assertEqual(main(["--init", "--yes"]), 0)
+            with open(os.path.join(hooks_dir, "pre-commit"), "r", encoding="utf-8") as handle:
+                self.assertIn("secret-sentinel managed hook", handle.read())
+            self.assertFalse(os.path.exists(os.path.join(repo_root, ".secret-sentinel.ini")))
+
+    def test_main_init_does_not_replace_existing_hook(self) -> None:
+        """Init should preserve an unmanaged hook and report the conflict."""
+        with tempfile.TemporaryDirectory() as repo_root:
+            hooks_dir = os.path.join(repo_root, ".git", "hooks")
+            os.makedirs(hooks_dir)
+            hook_path = os.path.join(hooks_dir, "pre-commit")
+            with open(hook_path, "w", encoding="utf-8") as handle:
+                handle.write("#!/bin/sh\necho keep\n")
+            with patch("secret_sentinel.cli.get_git_root", return_value=repo_root):
+                self.assertEqual(main(["--init", "--yes"]), 1)
+            with open(hook_path, "r", encoding="utf-8") as handle:
+                self.assertEqual(handle.read(), "#!/bin/sh\necho keep\n")
+
+    def test_main_init_leaves_managed_hook_unchanged(self) -> None:
+        """Init should recognize an existing managed hook without rewriting it."""
+        with tempfile.TemporaryDirectory() as repo_root:
+            hooks_dir = os.path.join(repo_root, ".git", "hooks")
+            os.makedirs(hooks_dir)
+            hook_path = os.path.join(hooks_dir, "pre-commit")
+            original = "# secret-sentinel managed hook\ncustomized locally\n"
+            with open(hook_path, "w", encoding="utf-8") as handle:
+                handle.write(original)
+            with patch("secret_sentinel.cli.get_git_root", return_value=repo_root):
+                self.assertEqual(main(["--init", "--yes"]), 0)
+            with open(hook_path, "r", encoding="utf-8") as handle:
+                self.assertEqual(handle.read(), original)
+
+    def test_main_init_rejects_invalid_configuration_without_changes(self) -> None:
+        """Init should validate configuration before installing the hook."""
+        with tempfile.TemporaryDirectory() as repo_root:
+            hooks_dir = os.path.join(repo_root, ".git", "hooks")
+            os.makedirs(hooks_dir)
+            with open(
+                os.path.join(repo_root, ".secret-sentinel.ini"),
+                "w",
+                encoding="utf-8",
+            ) as handle:
+                handle.write("[custom_rules]\nBroken = HIGH | [\n")
+            with patch("secret_sentinel.cli.get_git_root", return_value=repo_root):
+                self.assertEqual(main(["--init", "--yes"]), 1)
+            self.assertFalse(os.path.exists(os.path.join(hooks_dir, "pre-commit")))
+
     def test_cli_scan_paths_execution(self) -> None:
         """Test cli.scan_paths with debug and no-ai flags."""
         with tempfile.TemporaryDirectory() as tmpdir:

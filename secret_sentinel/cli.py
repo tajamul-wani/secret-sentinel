@@ -141,6 +141,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="Check repository, configuration, hook, and optional baseline setup.",
     )
     parser.add_argument(
+        "--init",
+        action="store_true",
+        help="Set up the Git pre-commit hook after confirmation.",
+    )
+    parser.add_argument(
+        "--yes",
+        action="store_true",
+        help="Confirm setup changes non-interactively; use with --init.",
+    )
+    parser.add_argument(
         "--fail-on",
         choices=["LOW", "MEDIUM", "HIGH", "CRITICAL"],
         default=None,
@@ -198,16 +208,15 @@ def install_git_hook(repo_root: str) -> None:
         repo_root: Root path of the Git repository.
     """
     try:
-        hook_dir = os.path.join(repo_root, ".git", "hooks")
-        if not os.path.isdir(hook_dir):
+        hook_path = _get_git_hook_path(repo_root)
+        if not hook_path.parent.is_dir():
             logger.error("No Git hooks directory found in repository.")
             sys.exit(1)
-        hook_path = os.path.join(hook_dir, "pre-commit")
         if os.path.lexists(hook_path):
-            if os.path.islink(hook_path):
+            if hook_path.is_symlink():
                 logger.error("An existing pre-commit hook cannot be replaced.")
                 sys.exit(1)
-            with open(hook_path, "r", encoding="utf-8", errors="replace") as handle:
+            with hook_path.open("r", encoding="utf-8", errors="replace") as handle:
                 if HOOK_MARKER not in handle.read():
                     logger.error("An existing pre-commit hook cannot be replaced.")
                     sys.exit(1)
@@ -225,7 +234,7 @@ from secret_sentinel.cli import main
 if __name__ == "__main__":
     sys.exit(main(["--no-ai", "--staged"]))
 """
-        with open(hook_path, "w", encoding="utf-8") as handle:
+        with hook_path.open("w", encoding="utf-8") as handle:
             handle.write(hook_contents)
         os.chmod(hook_path, 0o755)
         print(f"Installed pre-commit hook at {hook_path}")
@@ -241,12 +250,12 @@ def uninstall_git_hook(repo_root: str) -> None:
         repo_root: Root path of the Git repository.
     """
     try:
-        hook_path = os.path.join(repo_root, ".git", "hooks", "pre-commit")
+        hook_path = _get_git_hook_path(repo_root)
         if os.path.lexists(hook_path):
-            if os.path.islink(hook_path):
+            if hook_path.is_symlink():
                 logger.error("The existing pre-commit hook is not managed by Secret Sentinel.")
                 sys.exit(1)
-            with open(hook_path, "r", encoding="utf-8", errors="replace") as handle:
+            with hook_path.open("r", encoding="utf-8", errors="replace") as handle:
                 if HOOK_MARKER not in handle.read():
                     logger.error("The existing pre-commit hook is not managed by Secret Sentinel.")
                     sys.exit(1)
@@ -327,6 +336,58 @@ def run_doctor(repo_root: Optional[str]) -> int:
         validation = "disabled (optional)"
     print(f"[INFO] AI validation: {validation}")
     print("Configuration checks passed.")
+    return 0
+
+
+def run_init(repo_root: Optional[str], assume_yes: bool = False) -> int:
+    """Install the pre-commit hook only after an explicit user confirmation."""
+    if repo_root is None:
+        logger.error("Run `secret-sentinel --init` from inside a Git repository.")
+        return 1
+
+    try:
+        SecretSentinelConfig.load(repo_root)
+    except (OSError, configparser.Error, ValueError):
+        logger.error("Configuration could not be loaded; no changes were made.")
+        return 1
+
+    hook_path = _get_git_hook_path(repo_root)
+    if hook_path.is_symlink():
+        logger.error("An existing pre-commit hook cannot be replaced.")
+        return 1
+    if hook_path.is_file():
+        try:
+            with hook_path.open("r", encoding="utf-8", errors="replace") as handle:
+                managed = HOOK_MARKER in handle.read()
+        except OSError:
+            logger.error("The existing pre-commit hook could not be checked.")
+            return 1
+        if managed:
+            print("Secret Sentinel's pre-commit hook is already installed; no changes were made.")
+            return 0
+        logger.error("An existing pre-commit hook cannot be replaced.")
+        return 1
+
+    if not assume_yes:
+        if not sys.stdin.isatty():
+            logger.error("Use --yes to confirm setup when running non-interactively.")
+            return 2
+        try:
+            answer = input("Install the Secret Sentinel pre-commit hook? [y/N] ")
+        except EOFError:
+            print("No changes were made.")
+            return 0
+        if answer.strip().lower() not in ("y", "yes"):
+            print("No changes were made.")
+            return 0
+
+    try:
+        install_git_hook(repo_root)
+    except SystemExit as exc:
+        return int(exc.code) if isinstance(exc.code, int) else 1
+
+    print("Next: run `secret-sentinel --staged` to scan staged changes.")
+    print("Baselines are optional; review existing findings before creating one.")
     return 0
 
 
@@ -431,9 +492,15 @@ def main(argv: Optional[List[str]] = None) -> int:
     git_root = get_git_root()
     repo_root = git_root or os.getcwd()
 
+    if args.yes and not args.init:
+        logger.error("--yes can only be used with --init.")
+        return 2
+
     if args.doctor:
         if (
             args.paths
+            or args.init
+            or args.yes
             or args.staged
             or args.git_history
             or args.diff is not None
@@ -451,6 +518,27 @@ def main(argv: Optional[List[str]] = None) -> int:
             logger.error("--doctor cannot be combined with scan or management options.")
             return 2
         return run_doctor(git_root)
+
+    if args.init:
+        if (
+            args.paths
+            or args.staged
+            or args.git_history
+            or args.diff is not None
+            or args.all_refs
+            or args.baseline
+            or args.update_baseline
+            or args.history
+            or args.stats
+            or args.clear_history
+            or args.install_hook
+            or args.uninstall_hook
+            or args.output
+            or args.format != "text"
+        ):
+            logger.error("--init cannot be combined with scan or management options.")
+            return 2
+        return run_init(git_root, assume_yes=args.yes)
 
     if (args.baseline or args.update_baseline) and (
         args.history
