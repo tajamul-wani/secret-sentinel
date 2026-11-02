@@ -26,6 +26,22 @@ Or install directly from GitHub:
 python -m pip install "git+https://github.com/tajamul-wani/secret-sentinel.git"
 ```
 
+## Quick setup
+
+From the Git repository where you want to enable scanning, run:
+
+```bash
+secret-sentinel --init
+```
+
+The command asks before installing the pre-commit hook. It does not replace an
+existing hook or create configuration or baseline files. For scripted setup,
+pass `--yes` to confirm explicitly:
+
+```bash
+secret-sentinel --init --yes
+```
+
 ## Run it locally
 
 Scan staged changes:
