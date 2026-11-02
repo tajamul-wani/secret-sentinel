@@ -23,7 +23,7 @@ def format_text(
         Formatted summary string.
     """
     if not issues:
-        message = "secret-sentinel scan passed."
+        message = "All clear! No potential secrets found."
         if baseline_suppressed:
             message += f" ({baseline_suppressed} baseline finding(s) ignored)."
         return message
