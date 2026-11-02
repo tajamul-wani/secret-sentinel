@@ -107,6 +107,7 @@ class TestCLI(unittest.TestCase):
                 content = f.read()
             self.assertIn("secret_sentinel.cli", content)
             self.assertIn("secret-sentinel managed hook", content)
+            self.assertIn("repo_root = Path.cwd().resolve()", content)
 
             uninstall_git_hook(tmpdir)
             self.assertFalse(os.path.exists(hook_file))
@@ -365,6 +366,12 @@ class TestCLI(unittest.TestCase):
             with redirect_stdout(output):
                 self.assertEqual(main(["--doctor"]), 1)
         self.assertIn("Git repository: not found", output.getvalue())
+
+    def test_main_setup_commands_reject_unrelated_options(self) -> None:
+        """Setup commands should reject options that would otherwise be ignored."""
+        with patch("secret_sentinel.cli.get_git_root", return_value=None):
+            self.assertEqual(main(["--doctor", "--staged"]), 2)
+            self.assertEqual(main(["--yes"]), 2)
 
     def test_main_doctor_reports_safe_repository_status(self) -> None:
         """Doctor should report optional setup without changing repository files."""

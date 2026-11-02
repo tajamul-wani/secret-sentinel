@@ -225,8 +225,8 @@ import sys
 from pathlib import Path
 
 """ + HOOK_MARKER + """
-# Resolve repository root from .git/hooks/pre-commit
-repo_root = Path(__file__).resolve().parent.parent.parent
+# Git runs hooks from the active worktree root.
+repo_root = Path.cwd().resolve()
 sys.path.insert(0, str(repo_root))
 
 from secret_sentinel.cli import main
@@ -512,6 +512,9 @@ def main(argv: Optional[List[str]] = None) -> int:
             or args.clear_history
             or args.install_hook
             or args.uninstall_hook
+            or args.no_ai
+            or args.fail_on is not None
+            or args.history_limit != 10
             or args.output
             or args.format != "text"
         ):
@@ -533,6 +536,9 @@ def main(argv: Optional[List[str]] = None) -> int:
             or args.clear_history
             or args.install_hook
             or args.uninstall_hook
+            or args.no_ai
+            or args.fail_on is not None
+            or args.history_limit != 10
             or args.output
             or args.format != "text"
         ):
