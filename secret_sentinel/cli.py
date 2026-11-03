@@ -57,6 +57,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="secret-sentinel",
         description="Local AI-assisted secret scanner for Git pre-commit hooks.",
+        epilog=(
+            "Quick start:\n"
+            "  secret-sentinel --setup   Choose a setup path\n"
+            "  secret-sentinel .         Scan the working tree\n"
+            "  secret-sentinel --staged  Scan staged changes\n"
+            "  secret-sentinel --doctor  Check repository setup"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
         "paths",
@@ -139,6 +147,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--doctor",
         action="store_true",
         help="Check repository, configuration, hook, and optional baseline setup.",
+    )
+    parser.add_argument(
+        "--setup",
+        action="store_true",
+        help="Interactively choose a local scan, hook, baseline, or CI setup path.",
     )
     parser.add_argument(
         "--init",
@@ -304,6 +317,7 @@ def run_doctor(repo_root: Optional[str]) -> int:
     config_status = "valid" if config_path.is_file() else "defaults active"
     print(f"[ OK ] Configuration: {config_status}")
     hook_path = _get_git_hook_path(repo_root)
+    hook_needs_setup = False
     if hook_path.is_symlink():
         print("[WARN] Pre-commit hook: symbolic link present; left unchecked")
     elif hook_path.is_file():
@@ -319,6 +333,7 @@ def run_doctor(repo_root: Optional[str]) -> int:
                 print("[WARN] Pre-commit hook: another hook is present")
     else:
         print("[WARN] Pre-commit hook: not installed (optional)")
+        hook_needs_setup = True
 
     baseline_path = Path(repo_root) / ScanBaseline.DEFAULT_PATH
     if baseline_path.is_file():
@@ -336,7 +351,64 @@ def run_doctor(repo_root: Optional[str]) -> int:
         validation = "disabled (optional)"
     print(f"[INFO] AI validation: {validation}")
     print("Configuration checks passed.")
+    if hook_needs_setup:
+        print("Next: run `secret-sentinel --init` to add the optional pre-commit hook.")
     return 0
+
+
+def run_setup(repo_root: Optional[str]) -> int:
+    """Guide users through common setup choices without making implicit changes."""
+    if repo_root is None:
+        logger.error("Run `secret-sentinel --setup` from inside a Git repository.")
+        return 1
+    if not sys.stdin.isatty():
+        logger.error(
+            "Interactive setup requires a terminal. See `secret-sentinel --help`."
+        )
+        return 2
+
+    print("Choose how you want to get started:")
+    print("  1. Install a pre-commit hook")
+    print("  2. Track existing findings with a baseline")
+    print("  3. Add a GitHub Actions scan")
+    print("  4. Show local scan commands")
+    try:
+        choice = input("Select 1-4 [4]: ").strip() or "4"
+    except EOFError:
+        print("No changes were made.")
+        return 0
+
+    if choice == "1":
+        return run_init(repo_root)
+    if choice == "2":
+        print("Review current findings before recording a baseline.")
+        print(
+            "Set SECRET_SENTINEL_BASELINE_KEY to the same random key in your "
+            "local environment and trusted CI secrets."
+        )
+        print(
+            'Generate a key with `python -c "import secrets; '
+            'print(secrets.token_hex(32))"`; do not commit it.'
+        )
+        print("Then run `secret-sentinel --update-baseline .`.")
+        print("Later scans can use `secret-sentinel --baseline .`.")
+        print("The baseline stores keyed fingerprints, not secret values.")
+        return 0
+    if choice == "3":
+        print("See the copyable GitHub Actions example in the project README:")
+        print("https://github.com/tajamul-wani/secret-sentinel#github-actions")
+        print(
+            "For pull requests, scan changed lines with "
+            "`secret-sentinel --diff origin/main`."
+        )
+        return 0
+    if choice == "4":
+        print("Scan the working tree with `secret-sentinel .`.")
+        print("Scan staged changes with `secret-sentinel --staged`.")
+        return 0
+
+    logger.error("Choose 1, 2, 3, or 4. No changes were made.")
+    return 2
 
 
 def run_init(repo_root: Optional[str], assume_yes: bool = False) -> int:
@@ -386,7 +458,11 @@ def run_init(repo_root: Optional[str], assume_yes: bool = False) -> int:
     except SystemExit as exc:
         return int(exc.code) if isinstance(exc.code, int) else 1
 
-    print("Next: run `secret-sentinel --staged` to scan staged changes.")
+    print("Setup complete: the hook scans staged changes before each commit.")
+    print(
+        "Next: run `secret-sentinel .` to scan the working tree, "
+        "or `secret-sentinel --doctor` to check setup."
+    )
     print("Baselines are optional; review existing findings before creating one.")
     return 0
 
@@ -496,9 +572,37 @@ def main(argv: Optional[List[str]] = None) -> int:
         logger.error("--yes can only be used with --init.")
         return 2
 
+    if args.setup:
+        if (
+            args.paths
+            or args.doctor
+            or args.init
+            or args.yes
+            or args.staged
+            or args.git_history
+            or args.diff is not None
+            or args.all_refs
+            or args.baseline
+            or args.update_baseline
+            or args.history
+            or args.stats
+            or args.clear_history
+            or args.install_hook
+            or args.uninstall_hook
+            or args.no_ai
+            or args.fail_on is not None
+            or args.history_limit != 10
+            or args.output
+            or args.format != "text"
+        ):
+            logger.error("--setup cannot be combined with scan or management options.")
+            return 2
+        return run_setup(git_root)
+
     if args.doctor:
         if (
             args.paths
+            or args.setup
             or args.init
             or args.yes
             or args.staged
@@ -525,6 +629,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     if args.init:
         if (
             args.paths
+            or args.setup
             or args.staged
             or args.git_history
             or args.diff is not None

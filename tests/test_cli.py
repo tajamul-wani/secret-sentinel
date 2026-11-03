@@ -30,6 +30,12 @@ class TestCLI(unittest.TestCase):
         """Verify parser construction."""
         parser = build_parser()
         self.assertEqual(parser.prog, "secret-sentinel")
+        self.assertIn("--setup", parser.format_help())
+        self.assertIn("secret-sentinel --staged", parser.format_help())
+
+    def test_parse_args_setup(self) -> None:
+        """Parse the interactive setup guide option."""
+        self.assertTrue(parse_args(["--setup"]).setup)
 
     def test_parse_args_defaults(self) -> None:
         """Default arguments should have empty paths and staged false."""
@@ -384,9 +390,116 @@ class TestCLI(unittest.TestCase):
             report = output.getvalue()
             self.assertIn("Configuration: defaults active", report)
             self.assertIn("Pre-commit hook: not installed (optional)", report)
+            self.assertIn("secret-sentinel --init", report)
             self.assertIn("Baseline: not configured (optional)", report)
             self.assertFalse(os.path.exists(os.path.join(repo_root, ".secret-sentinel.ini")))
             self.assertFalse(os.path.exists(os.path.join(repo_root, ".git", "hooks", "pre-commit")))
+
+    def test_main_setup_guides_baseline_without_creating_files(self) -> None:
+        """Baseline guidance should explain key requirements without writing files."""
+        with tempfile.TemporaryDirectory() as repo_root:
+            stdin = MagicMock()
+            stdin.isatty.return_value = True
+            output = StringIO()
+            with (
+                patch("secret_sentinel.cli.get_git_root", return_value=repo_root),
+                patch("secret_sentinel.cli.sys.stdin", stdin),
+                patch("builtins.input", return_value="2"),
+                redirect_stdout(output),
+            ):
+                self.assertEqual(main(["--setup"]), 0)
+
+            guidance = output.getvalue()
+            self.assertIn("Review current findings", guidance)
+            self.assertIn("SECRET_SENTINEL_BASELINE_KEY", guidance)
+            self.assertIn("secrets.token_hex(32)", guidance)
+            self.assertIn("secret-sentinel --update-baseline .", guidance)
+            self.assertIn("not secret values", guidance)
+            baseline_dir = os.path.join(repo_root, ".secret-sentinel")
+            self.assertFalse(os.path.exists(baseline_dir))
+
+    def test_main_setup_guides_github_actions(self) -> None:
+        """CI setup should point to the documented workflow without side effects."""
+        with tempfile.TemporaryDirectory() as repo_root:
+            stdin = MagicMock()
+            stdin.isatty.return_value = True
+            output = StringIO()
+            with (
+                patch("secret_sentinel.cli.get_git_root", return_value=repo_root),
+                patch("secret_sentinel.cli.sys.stdin", stdin),
+                patch("builtins.input", return_value="3"),
+                redirect_stdout(output),
+            ):
+                self.assertEqual(main(["--setup"]), 0)
+
+            self.assertIn("#github-actions", output.getvalue())
+            self.assertFalse(os.path.exists(os.path.join(repo_root, ".github")))
+
+    def test_main_setup_defaults_to_manual_scan_guidance(self) -> None:
+        """Pressing enter at setup should suggest a safe manual scan."""
+        with tempfile.TemporaryDirectory() as repo_root:
+            stdin = MagicMock()
+            stdin.isatty.return_value = True
+            output = StringIO()
+            with (
+                patch("secret_sentinel.cli.get_git_root", return_value=repo_root),
+                patch("secret_sentinel.cli.sys.stdin", stdin),
+                patch("builtins.input", return_value=""),
+                redirect_stdout(output),
+            ):
+                self.assertEqual(main(["--setup"]), 0)
+            self.assertIn("secret-sentinel .", output.getvalue())
+            self.assertIn("secret-sentinel --staged", output.getvalue())
+
+    def test_main_setup_requires_terminal(self) -> None:
+        """Interactive setup should not make assumptions in non-interactive use."""
+        stdin = MagicMock()
+        stdin.isatty.return_value = False
+        with (
+            patch("secret_sentinel.cli.get_git_root", return_value="/repo"),
+            patch("secret_sentinel.cli.sys.stdin", stdin),
+        ):
+            self.assertEqual(main(["--setup"]), 2)
+
+    def test_main_setup_rejects_invalid_choice_without_changes(self) -> None:
+        """An unknown setup selection should fail without changing repository files."""
+        with tempfile.TemporaryDirectory() as repo_root:
+            stdin = MagicMock()
+            stdin.isatty.return_value = True
+            with (
+                patch("secret_sentinel.cli.get_git_root", return_value=repo_root),
+                patch("secret_sentinel.cli.sys.stdin", stdin),
+                patch("builtins.input", return_value="5"),
+            ):
+                self.assertEqual(main(["--setup"]), 2)
+            self.assertEqual(os.listdir(repo_root), [])
+
+    def test_main_setup_rejects_scan_options(self) -> None:
+        """Setup mode should reject options that would otherwise be ignored."""
+        with patch("secret_sentinel.cli.get_git_root", return_value=None):
+            self.assertEqual(main(["--setup", "--staged"]), 2)
+
+    def test_main_setup_requires_git_repository(self) -> None:
+        """Setup guide should explain when no repository is available."""
+        with patch("secret_sentinel.cli.get_git_root", return_value=None):
+            self.assertEqual(main(["--setup"]), 1)
+
+    def test_main_setup_can_install_hook_after_selection_and_confirmation(self) -> None:
+        """Hook installation requires a menu selection and a separate confirmation."""
+        with tempfile.TemporaryDirectory() as repo_root:
+            hooks_dir = os.path.join(repo_root, ".git", "hooks")
+            os.makedirs(hooks_dir)
+            stdin = MagicMock()
+            stdin.isatty.return_value = True
+            with (
+                patch("secret_sentinel.cli.get_git_root", return_value=repo_root),
+                patch("secret_sentinel.cli.sys.stdin", stdin),
+                patch("builtins.input", side_effect=["1", "yes"]),
+            ):
+                self.assertEqual(main(["--setup"]), 0)
+            hook_path = os.path.join(hooks_dir, "pre-commit")
+            with open(hook_path, "r", encoding="utf-8") as handle:
+                self.assertIn("secret-sentinel managed hook", handle.read())
 
     def test_main_doctor_hides_configuration_errors(self) -> None:
         """Doctor should not print configuration contents when parsing fails."""
@@ -416,11 +529,18 @@ class TestCLI(unittest.TestCase):
         with tempfile.TemporaryDirectory() as repo_root:
             hooks_dir = os.path.join(repo_root, ".git", "hooks")
             os.makedirs(hooks_dir)
-            with patch("secret_sentinel.cli.get_git_root", return_value=repo_root):
+            output = StringIO()
+            with (
+                patch("secret_sentinel.cli.get_git_root", return_value=repo_root),
+                redirect_stdout(output),
+            ):
                 self.assertEqual(main(["--init", "--yes"]), 0)
             with open(os.path.join(hooks_dir, "pre-commit"), "r", encoding="utf-8") as handle:
                 self.assertIn("secret-sentinel managed hook", handle.read())
             self.assertFalse(os.path.exists(os.path.join(repo_root, ".secret-sentinel.ini")))
+            self.assertIn("Setup complete", output.getvalue())
+            self.assertIn("secret-sentinel .", output.getvalue())
+            self.assertIn("secret-sentinel --doctor", output.getvalue())
 
     def test_main_init_does_not_replace_existing_hook(self) -> None:
         """Init should preserve an unmanaged hook and report the conflict."""
