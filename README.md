@@ -145,6 +145,13 @@ a secrets manager. Removing a value from the working tree does not invalidate
 it; history cleanup should follow revocation and may require coordination with
 repository collaborators.
 
+If you confirm a finding is not a credential, prefer a narrow suppression with
+a reason and an expiry rather than disabling checks for a directory or file
+type. Use `.secretignore` or `ignore_paths` only when an entire path is
+intentionally out of scope; broad patterns can hide future credentials.
+Baselines are for tracking accepted existing findings, not for dismissing a
+finding that should be suppressed at its source.
+
 ### Configurable Failure Threshold
 
 Configure which severity level blocks commits or causes CI to fail:
