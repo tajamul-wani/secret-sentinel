@@ -115,10 +115,13 @@ Check the setup without changing repository files:
 secret-sentinel --doctor
 ```
 
-The diagnostic reports Git repository, configuration, pre-commit hook, optional
-baseline, and AI-validation status. It does not display secret values. Missing
-optional setup is reported as a warning; the command fails if it is run outside
-a Git repository or the configuration cannot be loaded.
+The diagnostic reports Git repository, effective scan settings, pre-commit
+hook, optional baseline, and AI-validation status. It validates a baseline's
+format when a sufficiently long key is configured, but cannot confirm that the
+key matches the one used to create it. It does not display secret values.
+Missing optional setup is reported as a warning; the command fails if it is run
+outside a Git repository, configuration cannot be loaded, or baseline
+validation fails when a sufficiently long key is configured.
 When the hook is missing, it also suggests the optional `--init` command.
 
 Text reports summarize findings by severity, list higher-severity findings
