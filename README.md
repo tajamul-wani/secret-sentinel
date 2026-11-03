@@ -212,14 +212,48 @@ configuration error. Keep this configuration free of real credential values.
 
 ### GitHub Actions
 
-The included workflow tests the package, scans the repository, and uploads a
-SARIF report to GitHub Code Scanning. To make it ignore known findings, add the
-same key used to create the baseline as a repository Actions secret named
+Add a workflow like this to `.github/workflows/secret-scan.yml` to scan pull
+request changes. It needs no API key or repository secret:
+
+```yaml
+name: Secret scan
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Secret Sentinel
+        run: python -m pip install "git+https://github.com/tajamul-wani/secret-sentinel.git"
+      - name: Scan changed lines
+        env:
+          PR_BASE_REF: ${{ github.base_ref }}
+        run: secret-sentinel --diff "origin/$PR_BASE_REF"
+```
+
+Change `main` in the workflow trigger to the target branch used by your
+repository.
+
+The full workflow in this repository also runs tests and uploads SARIF to
+GitHub Code Scanning. It scans pull request changes without passing secrets to
+untrusted code. The baseline key is only passed to trusted pushes on `main`;
+pull-request scans run without it. To use a baseline on pushes, add the same
+key used to create the baseline as a repository Actions secret named
 `SECRET_SENTINEL_BASELINE_KEY` (Settings → Secrets and variables → Actions).
-The key is only passed to trusted pushes on `main`; pull requests scan added and
-modified lines against their base branch without a baseline, so untrusted PR
-code never receives the key. If the key or baseline file is unavailable on a
-push, the workflow scans without a baseline.
+If the key or baseline file is unavailable, the workflow scans without a
+baseline.
 
 ### Output Formats
 
