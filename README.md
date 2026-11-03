@@ -366,7 +366,7 @@ Create a `.secret-sentinel.ini` in the repository root:
 
 ```ini
 [secret-sentinel]
-ignore_paths = tests/*, docs/*
+ignore_paths = tests/fixtures/credential_examples.json
 ai_enabled = false
 ai_cloud_enabled = false
 fail_on = HIGH
@@ -383,9 +383,8 @@ either AI validator; cloud validation is attempted only when explicitly enabled.
 You can also create a `.secretignore` file in your repository root to ignore specific paths or mock data:
 
 ```text
-# Exclude test fixture data
-tests/fixtures/*
-mock_data/*.json
+# Exclude one reviewed fixture file, not the entire tests directory
+tests/fixtures/credential_examples.json
 ```
 
 ## Safety model
