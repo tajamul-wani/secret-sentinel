@@ -57,12 +57,42 @@ def format_text(
             message += f" ({baseline_suppressed} baseline finding(s) ignored)."
         return message
 
-    lines = [f"Detected potential secrets ({len(issues)}):"]
+    severity_counts = {severity: 0 for severity in SeverityLevel}
     for issue in issues:
+        severity_counts[get_issue_severity(issue)] += 1
+
+    lines = [f"Detected potential secrets ({len(issues)}):"]
+    lines.append(
+        "Severity summary: "
+        + ", ".join(
+            f"{severity.name}: {count}"
+            for severity, count in severity_counts.items()
+            if count
+        )
+    )
+    lines.append(
+        "Next: verify each finding; revoke or rotate any real credential first, "
+        "then investigate provider activity."
+    )
+    lines.append(
+        "Possible false positive? Prefer a line-level ignore with a reason and "
+        "expiry; avoid broad path exclusions."
+    )
+
+    ordered_issues = sorted(
+        issues,
+        key=lambda issue: get_issue_severity(issue).value,
+        reverse=True,
+    )
+    for issue in ordered_issues:
+        severity = get_issue_severity(issue)
         raw_snippet = str(issue.get("snippet", ""))
         secret_val = str(issue.get("value", ""))
         safe_snippet = sanitize_snippet(raw_snippet, secret_val)
-        entry = f"{issue['source']}:{issue['line']} [{issue['matcher']}] - {safe_snippet}"
+        entry = (
+            f"[{severity.name}] {issue['source']}:{issue['line']} "
+            f"[{issue['matcher']}] - {safe_snippet}"
+        )
         if issue.get("entropy") is not None:
             entry += f" (entropy={issue['entropy']})"
         if issue.get("commit"):
