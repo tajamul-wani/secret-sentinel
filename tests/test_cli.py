@@ -5,8 +5,10 @@ import tempfile
 import unittest
 from contextlib import redirect_stdout
 from io import StringIO
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+from secret_sentinel.baseline import ScanBaseline
 from secret_sentinel.cli import (
     build_parser,
     install_git_hook,
@@ -394,6 +396,128 @@ class TestCLI(unittest.TestCase):
             self.assertIn("Baseline: not configured (optional)", report)
             self.assertFalse(os.path.exists(os.path.join(repo_root, ".secret-sentinel.ini")))
             self.assertFalse(os.path.exists(os.path.join(repo_root, ".git", "hooks", "pre-commit")))
+
+    def test_main_doctor_reports_effective_scan_settings(self) -> None:
+        """Doctor should summarize effective settings without exposing patterns."""
+        with tempfile.TemporaryDirectory() as repo_root:
+            config_path = Path(repo_root) / ".secret-sentinel.ini"
+            config_path.write_text(
+                "[secret-sentinel]\n"
+                "ignore_paths = private-fixtures/*\n"
+                "fail_on = HIGH\n"
+                "[custom_rules]\n"
+                "Private Token = CRITICAL | private_[A-Za-z0-9]+\n",
+                encoding="utf-8",
+            )
+            output = StringIO()
+            with (
+                patch("secret_sentinel.cli.get_git_root", return_value=repo_root),
+                redirect_stdout(output),
+            ):
+                self.assertEqual(main(["--doctor"]), 0)
+
+            report = output.getvalue()
+            self.assertIn("fail on HIGH", report)
+            self.assertIn("ignored path patterns", report)
+            self.assertIn("1 custom rules", report)
+            self.assertNotIn("private-fixtures", report)
+            self.assertNotIn("private_[A-Za-z0-9]", report)
+            self.assertIn("Doctor checks passed.", report)
+
+    def test_main_doctor_gives_actionable_unmanaged_hook_guidance(self) -> None:
+        """Doctor should explain how to handle an existing unmanaged hook."""
+        with tempfile.TemporaryDirectory() as repo_root:
+            hooks_dir = Path(repo_root) / ".git" / "hooks"
+            hooks_dir.mkdir(parents=True)
+            hook_path = hooks_dir / "pre-commit"
+            hook_path.write_text("#!/bin/sh\necho existing\n", encoding="utf-8")
+            output = StringIO()
+            with (
+                patch("secret_sentinel.cli.get_git_root", return_value=repo_root),
+                redirect_stdout(output),
+            ):
+                self.assertEqual(main(["--doctor"]), 0)
+
+            report = output.getvalue()
+            self.assertIn("another hook is present", report)
+            self.assertIn("combine the scanner with it manually", report)
+            self.assertNotIn("secret-sentinel --init", report)
+
+    def test_main_doctor_reports_missing_baseline_key_safely(self) -> None:
+        """Doctor should tell users how to configure a key without echoing it."""
+        with tempfile.TemporaryDirectory() as repo_root:
+            baseline_path = Path(repo_root) / ScanBaseline.DEFAULT_PATH
+            baseline_path.parent.mkdir(parents=True)
+            baseline_path.write_text(
+                '{"version": 1, "fingerprints": []}\n', encoding="utf-8"
+            )
+            output = StringIO()
+            with (
+                patch("secret_sentinel.cli.get_git_root", return_value=repo_root),
+                patch.dict(os.environ, {ScanBaseline.KEY_ENVIRONMENT_VARIABLE: ""}),
+                redirect_stdout(output),
+            ):
+                self.assertEqual(main(["--doctor"]), 0)
+
+            report = output.getvalue()
+            self.assertIn("key is missing or too short", report)
+            self.assertIn(ScanBaseline.KEY_ENVIRONMENT_VARIABLE, report)
+            self.assertIn("Doctor checks passed.", report)
+
+    def test_main_doctor_validates_baseline_and_hides_key(self) -> None:
+        """Doctor should validate a usable baseline without printing its key."""
+        with tempfile.TemporaryDirectory() as repo_root:
+            key = "test-key-" + "x" * 32
+            output = StringIO()
+            with (
+                patch.dict(os.environ, {ScanBaseline.KEY_ENVIRONMENT_VARIABLE: key}),
+                patch("secret_sentinel.cli.get_git_root", return_value=repo_root),
+                redirect_stdout(output),
+            ):
+                ScanBaseline(repo_root).save([])
+                self.assertEqual(main(["--doctor"]), 0)
+
+            self.assertIn(
+                "Baseline: format valid; key meets minimum length",
+                output.getvalue(),
+            )
+            self.assertNotIn(key, output.getvalue())
+
+    def test_main_doctor_rejects_bad_baseline_without_leaking(self) -> None:
+        """An invalid baseline should fail doctor without echoing its contents."""
+        with tempfile.TemporaryDirectory() as repo_root:
+            baseline_path = Path(repo_root) / ScanBaseline.DEFAULT_PATH
+            baseline_path.parent.mkdir(parents=True)
+            baseline_path.write_text("sensitive malformed payload", encoding="utf-8")
+            key = "test-key-" + "x" * 32
+            output = StringIO()
+            with (
+                patch("secret_sentinel.cli.get_git_root", return_value=repo_root),
+                patch.dict(os.environ, {ScanBaseline.KEY_ENVIRONMENT_VARIABLE: key}),
+                redirect_stdout(output),
+            ):
+                self.assertEqual(main(["--doctor"]), 1)
+
+            report = output.getvalue()
+            self.assertIn("Baseline: could not be validated", report)
+            self.assertIn("Doctor checks failed", report)
+            self.assertNotIn("sensitive malformed payload", report)
+            self.assertNotIn(key, report)
+
+    def test_main_doctor_rejects_baseline_path_that_is_not_a_file(self) -> None:
+        """A directory at the baseline location should not be reported as absent."""
+        with tempfile.TemporaryDirectory() as repo_root:
+            baseline_path = Path(repo_root) / ScanBaseline.DEFAULT_PATH
+            baseline_path.mkdir(parents=True)
+            output = StringIO()
+            with (
+                patch("secret_sentinel.cli.get_git_root", return_value=repo_root),
+                redirect_stdout(output),
+            ):
+                self.assertEqual(main(["--doctor"]), 1)
+
+            self.assertIn("Baseline: expected a regular file", output.getvalue())
+            self.assertIn("Doctor checks failed", output.getvalue())
 
     def test_main_setup_guides_baseline_without_creating_files(self) -> None:
         """Baseline guidance should explain key requirements without writing files."""

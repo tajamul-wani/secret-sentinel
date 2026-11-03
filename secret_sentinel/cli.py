@@ -310,16 +310,26 @@ def run_doctor(repo_root: Optional[str]) -> int:
         config = SecretSentinelConfig.load(repo_root)
     except (OSError, configparser.Error, ValueError):
         print("[FAIL] Configuration: could not be loaded")
-        print("Review .secret-sentinel.ini and .secretignore, then run doctor again.")
+        print(
+            "Review .secret-sentinel.ini and .secretignore for invalid settings, "
+            "then run `secret-sentinel --doctor` again."
+        )
         return 1
 
     config_path = Path(repo_root) / ".secret-sentinel.ini"
     config_status = "valid" if config_path.is_file() else "defaults active"
     print(f"[ OK ] Configuration: {config_status}")
+    print(
+        f"[INFO] Scan settings: fail on {config.fail_on.name}; "
+        f"{len(config.ignore_globs)} ignored path patterns; "
+        f"{len(config.custom_rules)} custom rules"
+    )
+
     hook_path = _get_git_hook_path(repo_root)
     hook_needs_setup = False
     if hook_path.is_symlink():
         print("[WARN] Pre-commit hook: symbolic link present; left unchecked")
+        print("Review the linked hook manually; Secret Sentinel will not replace it.")
     elif hook_path.is_file():
         try:
             with hook_path.open("r", encoding="utf-8", errors="replace") as handle:
@@ -331,29 +341,65 @@ def run_doctor(repo_root: Optional[str]) -> int:
                 print("[ OK ] Pre-commit hook: installed")
             else:
                 print("[WARN] Pre-commit hook: another hook is present")
+                print(
+                    "Keep the existing hook; combine the scanner with it manually "
+                    "if needed."
+                )
     else:
         print("[WARN] Pre-commit hook: not installed (optional)")
         hook_needs_setup = True
 
     baseline_path = Path(repo_root) / ScanBaseline.DEFAULT_PATH
-    if baseline_path.is_file():
+    baseline_error = False
+    baseline_exists = baseline_path.exists() or baseline_path.is_symlink()
+    if baseline_exists and not baseline_path.is_file():
+        print("[FAIL] Baseline: expected a regular file")
+        print(
+            "Move the existing path after reviewing it, then create a baseline "
+            "with `secret-sentinel --update-baseline`."
+        )
+        baseline_error = True
+    elif baseline_path.is_file():
         key = os.environ.get(ScanBaseline.KEY_ENVIRONMENT_VARIABLE, "")
         if len(key.encode("utf-8")) >= ScanBaseline.MINIMUM_KEY_LENGTH:
-            print("[ OK ] Baseline: present and key configured")
+            try:
+                baseline = ScanBaseline(repo_root)
+                baseline.load()
+            except (OSError, ValueError):
+                print("[FAIL] Baseline: could not be validated")
+                print(
+                    "Check the baseline file format and configured key; "
+                    "recreate it only after reviewing current findings."
+                )
+                baseline_error = True
+            else:
+                print("[ OK ] Baseline: format valid; key meets minimum length")
         else:
-            print("[WARN] Baseline: present; baseline key is not configured")
+            print("[WARN] Baseline: present; key is missing or too short")
+            print(
+                f"Set {ScanBaseline.KEY_ENVIRONMENT_VARIABLE} to the same "
+                "random key used to create the baseline."
+            )
     else:
         print("[INFO] Baseline: not configured (optional)")
+        if os.environ.get(ScanBaseline.KEY_ENVIRONMENT_VARIABLE):
+            print(
+                "[INFO] A baseline key is set, but no baseline file was found; "
+                "baseline checks are not active."
+            )
 
     if config.ai_enabled:
         validation = "enabled (cloud opt-in)" if config.ai_cloud_enabled else "enabled (local)"
     else:
         validation = "disabled (optional)"
     print(f"[INFO] AI validation: {validation}")
-    print("Configuration checks passed.")
+    if baseline_error:
+        print("Doctor checks failed; resolve the baseline issue above.")
+    else:
+        print("Doctor checks passed.")
     if hook_needs_setup:
         print("Next: run `secret-sentinel --init` to add the optional pre-commit hook.")
-    return 0
+    return 1 if baseline_error else 0
 
 
 def run_setup(repo_root: Optional[str]) -> int:
