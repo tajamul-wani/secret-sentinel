@@ -38,11 +38,29 @@ class TestFormatters(unittest.TestCase):
         self.assertIn("[REDACTED]", result)
         self.assertNotIn(DUMMY_AWS, result)
         self.assertIn("CRITICAL", result)
+        self.assertIn("Severity summary: CRITICAL: 1", result)
+        self.assertIn("Next: verify each finding", result)
+        self.assertIn("Possible false positive?", result)
         self.assertIn("Why flagged: A built-in secret pattern matched.", result)
         self.assertIn("Confidence: high.", result)
         self.assertIn("Deactivate the access key in IAM", result)
         self.assertIn("Review CloudTrail", result)
         self.assertIn("remove the exposed value from repository history", result)
+
+    def test_format_text_sorts_findings_by_severity(self) -> None:
+        """Text output should summarize severities and list urgent findings first."""
+        medium_issue = {
+            "source": "app.py",
+            "line": 2,
+            "matcher": "High entropy string",
+            "value": "randomStr1234567890",
+            "snippet": 'token = "randomStr1234567890"',
+            "severity": "MEDIUM",
+        }
+        result = format_text([medium_issue, self.sample_issues[0]])
+        self.assertIn("Severity summary: CRITICAL: 1, MEDIUM: 1", result)
+        self.assertLess(result.index("[CRITICAL]"), result.index("[MEDIUM]"))
+        self.assertNotIn(medium_issue["value"], result)
 
     def test_format_text_explains_entropy_findings(self) -> None:
         """Text output should explain entropy signals and their confidence."""
