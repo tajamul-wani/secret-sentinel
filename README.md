@@ -52,6 +52,9 @@ pass `--yes` to confirm explicitly:
 secret-sentinel --init --yes
 ```
 
+After setup, the command confirms the hook is active and suggests a working-tree
+scan or a setup check with `secret-sentinel --doctor`.
+
 ## Run it locally
 
 Scan staged changes:
