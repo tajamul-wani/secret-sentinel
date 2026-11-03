@@ -277,7 +277,8 @@ Reported snippets remain redacted.
 
 ### Inline Ignore Directives
 
-Suppress false positives or intentional test fixtures directly in source code:
+For a confirmed false positive or intentional test fixture, prefer a
+line-specific directive with a short reason and expiry:
 
 ```python
 # Ignore finding on the current line
