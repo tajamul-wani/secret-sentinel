@@ -119,8 +119,11 @@ The diagnostic reports Git repository, configuration, pre-commit hook, optional
 baseline, and AI-validation status. It does not display secret values. Missing
 optional setup is reported as a warning; the command fails if it is run outside
 a Git repository or the configuration cannot be loaded.
+When the hook is missing, it also suggests the optional `--init` command.
 
-Successful text scans report: `All clear! No potential secrets found.`
+Text reports summarize findings by severity, list higher-severity findings
+first, and show a suggested next step. Successful text scans report:
+`All clear! No potential secrets found.`
 
 ### Risk Scoring
 
