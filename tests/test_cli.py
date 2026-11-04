@@ -2,6 +2,7 @@
 
 import json
 import os
+import subprocess
 import tempfile
 import unittest
 from contextlib import redirect_stdout
@@ -13,12 +14,14 @@ from secret_sentinel.baseline import ScanBaseline
 from secret_sentinel.cli import (
     build_parser,
     install_git_hook,
+    install_git_pre_push_hook,
     main,
     parse_args,
     parse_args_from,
     scan_paths as cli_scan_paths,
     setup_logging,
     uninstall_git_hook,
+    uninstall_git_pre_push_hook,
 )
 from secret_sentinel.history import ScanHistory
 
@@ -86,6 +89,14 @@ class TestCLI(unittest.TestCase):
 
         args_uninstall = parse_args(["--uninstall-hook"])
         self.assertTrue(args_uninstall.uninstall_hook)
+
+    def test_parse_args_pre_push_hook_options(self) -> None:
+        """Parse pre-push hook management and hidden hook execution options."""
+        self.assertTrue(parse_args(["--install-pre-push-hook"]).install_pre_push_hook)
+        self.assertTrue(
+            parse_args(["--uninstall-pre-push-hook"]).uninstall_pre_push_hook
+        )
+        self.assertTrue(parse_args(["--pre-push"]).pre_push)
 
     def test_parse_args_history_and_stats(self) -> None:
         """Test history and statistics flags."""
@@ -167,6 +178,116 @@ class TestCLI(unittest.TestCase):
         """Uninstalling non-existent hook should complete without raising error."""
         with tempfile.TemporaryDirectory() as tmpdir:
             uninstall_git_hook(tmpdir)
+
+    def test_install_and_uninstall_git_pre_push_hook(self) -> None:
+        """Install and remove the managed pre-push hook safely."""
+        with tempfile.TemporaryDirectory() as repo_root:
+            hooks_dir = os.path.join(repo_root, ".git", "hooks")
+            os.makedirs(hooks_dir)
+
+            install_git_pre_push_hook(repo_root)
+
+            hook_path = os.path.join(hooks_dir, "pre-push")
+            self.assertTrue(os.path.isfile(hook_path))
+            self.assertTrue(os.access(hook_path, os.X_OK))
+            content = Path(hook_path).read_text(encoding="utf-8")
+            self.assertIn("secret-sentinel managed pre-push hook", content)
+            self.assertIn('main(["--pre-push"])', content)
+
+            uninstall_git_pre_push_hook(repo_root)
+            self.assertFalse(os.path.exists(hook_path))
+
+    def test_pre_push_hook_management_preserves_unmanaged_hook(self) -> None:
+        """Pre-push installation and removal must preserve unmanaged hooks."""
+        with tempfile.TemporaryDirectory() as repo_root:
+            hooks_dir = os.path.join(repo_root, ".git", "hooks")
+            os.makedirs(hooks_dir)
+            hook_path = os.path.join(hooks_dir, "pre-push")
+            original = "#!/bin/sh\necho existing\n"
+            Path(hook_path).write_text(original, encoding="utf-8")
+
+            with self.assertRaises(SystemExit) as install_error:
+                install_git_pre_push_hook(repo_root)
+            self.assertEqual(install_error.exception.code, 1)
+
+            with self.assertRaises(SystemExit) as uninstall_error:
+                uninstall_git_pre_push_hook(repo_root)
+            self.assertEqual(uninstall_error.exception.code, 1)
+            self.assertEqual(Path(hook_path).read_text(encoding="utf-8"), original)
+
+    def test_pre_push_hook_blocks_new_findings_and_allows_clean_pushes(self) -> None:
+        """The installed hook allows clean pushes and blocks newly added secrets."""
+        with tempfile.TemporaryDirectory() as temp_root:
+            local_repo = os.path.join(temp_root, "local")
+            remote_repo = os.path.join(temp_root, "remote.git")
+            os.makedirs(local_repo)
+            project_root = str(Path(__file__).resolve().parents[1])
+            environment = os.environ.copy()
+            existing_pythonpath = environment.get("PYTHONPATH", "")
+            environment["PYTHONPATH"] = os.pathsep.join(
+                path for path in (project_root, existing_pythonpath) if path
+            )
+
+            def run_git(
+                directory: str,
+                *arguments: str,
+                check: bool = True,
+            ) -> subprocess.CompletedProcess[str]:
+                return subprocess.run(
+                    ["git", *arguments],
+                    cwd=directory,
+                    env=environment,
+                    capture_output=True,
+                    text=True,
+                    check=check,
+                )
+
+            run_git(temp_root, "init", "--bare", "-q", remote_repo)
+            run_git(local_repo, "init", "-q")
+            run_git(local_repo, "config", "user.name", "Test User")
+            run_git(local_repo, "config", "user.email", "test@example.invalid")
+            Path(local_repo, "README.txt").write_text("clean\n", encoding="utf-8")
+            run_git(local_repo, "add", "README.txt")
+            run_git(local_repo, "commit", "-q", "-m", "clean commit")
+            run_git(local_repo, "remote", "add", "origin", remote_repo)
+            install_git_pre_push_hook(local_repo)
+
+            clean_push = run_git(
+                local_repo,
+                "push",
+                "origin",
+                "HEAD:refs/heads/main",
+                check=False,
+            )
+            self.assertEqual(
+                clean_push.returncode, 0, clean_push.stdout + clean_push.stderr
+            )
+            previous_remote_commit = run_git(
+                local_repo, "ls-remote", "origin", "refs/heads/main"
+            ).stdout.split()[0]
+
+            Path(local_repo, "settings.py").write_text(
+                f'aws_key = "{DUMMY_AWS}"\n', encoding="utf-8"
+            )
+            run_git(local_repo, "add", "settings.py")
+            run_git(local_repo, "commit", "-q", "-m", "add test finding")
+            blocked_push = run_git(
+                local_repo,
+                "push",
+                "origin",
+                "HEAD:refs/heads/main",
+                check=False,
+            )
+
+            self.assertNotEqual(blocked_push.returncode, 0)
+            push_output = blocked_push.stdout + blocked_push.stderr
+            self.assertIn("[REDACTED]", push_output)
+            self.assertNotIn(DUMMY_AWS, push_output)
+            self.assertEqual(
+                run_git(local_repo, "ls-remote", "origin", "refs/heads/main")
+                .stdout.split()[0],
+                previous_remote_commit,
+            )
 
     def test_main_clean_scan(self) -> None:
         """Main should return 0 when no issues are found."""
@@ -371,6 +492,56 @@ class TestCLI(unittest.TestCase):
             with patch("secret_sentinel.cli.get_git_root", return_value=tmpdir):
                 self.assertEqual(main(["--install-hook"]), 0)
                 self.assertEqual(main(["--uninstall-hook"]), 0)
+                self.assertEqual(main(["--install-pre-push-hook"]), 0)
+                self.assertEqual(main(["--uninstall-pre-push-hook"]), 0)
+
+    def test_main_pre_push_scan_blocks_findings_without_leaking_values(self) -> None:
+        """The hook entry point scans pushed refs and safely formats findings."""
+        issue = {
+            "source": "config.py",
+            "line": 1,
+            "matcher": "AWS Secret Access Key",
+            "value": DUMMY_AWS,
+            "snippet": f'key = "{DUMMY_AWS}"',
+            "confidence": "high",
+            "severity": "CRITICAL",
+        }
+        output = StringIO()
+        with tempfile.TemporaryDirectory() as repo_root:
+            with (
+                patch(
+                    "secret_sentinel.cli.get_git_root", return_value=repo_root
+                ),
+                patch(
+                    "secret_sentinel.cli.sys.stdin",
+                    StringIO(
+                        f"refs/heads/main {'a' * 40} "
+                        f"refs/heads/main {'0' * 40}\n"
+                    ),
+                ),
+                patch(
+                    "secret_sentinel.cli.scan_git_push_updates",
+                    return_value=[issue],
+                ),
+                redirect_stdout(output),
+            ):
+                self.assertEqual(main(["--pre-push"]), 1)
+
+        self.assertIn("Detected potential secrets (1)", output.getvalue())
+        self.assertIn("[REDACTED]", output.getvalue())
+        self.assertNotIn(DUMMY_AWS, output.getvalue())
+
+    def test_main_pre_push_scan_reports_invalid_update_data(self) -> None:
+        """An invalid update stream blocks the push without disclosing details."""
+        output = StringIO()
+        with (
+            patch("secret_sentinel.cli.get_git_root", return_value="/repo"),
+            patch("secret_sentinel.cli.sys.stdin", StringIO("bad input\n")),
+            redirect_stdout(output),
+        ):
+            self.assertEqual(main(["--pre-push"]), 1)
+        self.assertIn("Pre-push scan failed", output.getvalue())
+        self.assertNotIn("bad input", output.getvalue())
 
     def test_main_doctor_reports_missing_repository(self) -> None:
         """Doctor should explain when it is run outside a Git repository."""
@@ -529,10 +700,34 @@ class TestCLI(unittest.TestCase):
             report = output.getvalue()
             self.assertIn("Configuration: defaults active", report)
             self.assertIn("Pre-commit hook: not installed (optional)", report)
+            self.assertIn("Pre-push hook: not installed (optional)", report)
             self.assertIn("secret-sentinel --init", report)
+            self.assertIn("--install-pre-push-hook", report)
             self.assertIn("Baseline: not configured (optional)", report)
             self.assertFalse(os.path.exists(os.path.join(repo_root, ".secret-sentinel.ini")))
             self.assertFalse(os.path.exists(os.path.join(repo_root, ".git", "hooks", "pre-commit")))
+
+    def test_main_doctor_reports_managed_pre_push_hook(self) -> None:
+        """Doctor recognizes the installed pre-push hook without exposing content."""
+        with tempfile.TemporaryDirectory() as repo_root:
+            hooks_dir = Path(repo_root) / ".git" / "hooks"
+            hooks_dir.mkdir(parents=True)
+            (hooks_dir / "pre-push").write_text(
+                "#!/usr/bin/env python3\n"
+                "# secret-sentinel managed pre-push hook\n"
+                "private_hook_value\n",
+                encoding="utf-8",
+            )
+            output = StringIO()
+            with (
+                patch("secret_sentinel.cli.get_git_root", return_value=repo_root),
+                redirect_stdout(output),
+            ):
+                self.assertEqual(main(["--doctor"]), 0)
+
+            self.assertIn("Pre-push hook: installed", output.getvalue())
+            self.assertNotIn("private_hook_value", output.getvalue())
+            self.assertNotIn("--install-pre-push-hook", output.getvalue())
 
     def test_main_doctor_reports_effective_scan_settings(self) -> None:
         """Doctor should summarize effective settings without exposing patterns."""
@@ -765,7 +960,7 @@ class TestCLI(unittest.TestCase):
             with (
                 patch("secret_sentinel.cli.get_git_root", return_value=repo_root),
                 patch("secret_sentinel.cli.sys.stdin", stdin),
-                patch("builtins.input", return_value="5"),
+                patch("builtins.input", return_value="6"),
             ):
                 self.assertEqual(main(["--setup"]), 2)
             self.assertEqual(os.listdir(repo_root), [])
@@ -796,6 +991,26 @@ class TestCLI(unittest.TestCase):
             hook_path = os.path.join(hooks_dir, "pre-commit")
             with open(hook_path, "r", encoding="utf-8") as handle:
                 self.assertIn("secret-sentinel managed hook", handle.read())
+
+    def test_main_setup_can_install_pre_push_hook(self) -> None:
+        """Guided setup confirms and installs the optional pre-push hook."""
+        with tempfile.TemporaryDirectory() as repo_root:
+            hooks_dir = os.path.join(repo_root, ".git", "hooks")
+            os.makedirs(hooks_dir)
+            stdin = MagicMock()
+            stdin.isatty.return_value = True
+            with (
+                patch("secret_sentinel.cli.get_git_root", return_value=repo_root),
+                patch("secret_sentinel.cli.sys.stdin", stdin),
+                patch("builtins.input", side_effect=["5", "yes"]),
+            ):
+                self.assertEqual(main(["--setup"]), 0)
+
+            hook_path = os.path.join(hooks_dir, "pre-push")
+            self.assertIn(
+                "secret-sentinel managed pre-push hook",
+                Path(hook_path).read_text(encoding="utf-8"),
+            )
 
     def test_main_setup_cancellation_does_not_install_hook(self) -> None:
         """Declining hook installation should not change repository files."""
