@@ -34,11 +34,11 @@ jobs:
       - name: Run tests and verify >=80% coverage threshold
         run: python tests/run_coverage.py
 
-      - name: Scan pull request and generate SARIF report
+      - name: Scan pull request commit range and generate SARIF report
         if: github.event_name == 'pull_request'
         env:
           PR_BASE_REF: ${{ github.base_ref }}
-        run: secret-sentinel --diff "origin/$PR_BASE_REF" --format sarif --output results.sarif
+        run: secret-sentinel --commit-range "origin/$PR_BASE_REF" HEAD --format sarif --output results.sarif
 
       - name: Scan push and generate SARIF report
         if: github.event_name == 'push'

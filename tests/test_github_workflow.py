@@ -35,13 +35,17 @@ class TestGitHubWorkflow(unittest.TestCase):
             r"(?m)^  pull_request:\n    branches: \[ main \]",
         )
 
-    def test_pull_request_scan_uses_base_diff_without_baseline_key(self) -> None:
-        """Untrusted pull requests should scan only changed lines without secrets."""
+    def test_pull_request_scan_uses_commit_range_without_baseline_key(self) -> None:
+        """Untrusted pull requests scan commits without receiving secrets."""
         self.assertNotRegex(self.workflow, r"(?m)^(?:env| {4}env):")
-        step = self._workflow_step("Scan pull request and generate SARIF report")
+        step = self._workflow_step(
+            "Scan pull request commit range and generate SARIF report"
+        )
         self.assertIn("if: github.event_name == 'pull_request'", step)
         self.assertIn("PR_BASE_REF: ${{ github.base_ref }}", step)
-        self.assertIn('secret-sentinel --diff "origin/$PR_BASE_REF"', step)
+        self.assertIn(
+            'secret-sentinel --commit-range "origin/$PR_BASE_REF" HEAD', step
+        )
         self.assertIn("--format sarif --output results.sarif", step)
         self.assertNotIn("SECRET_SENTINEL_BASELINE_KEY", step)
 
@@ -61,7 +65,7 @@ class TestGitHubWorkflow(unittest.TestCase):
         self.assertIn("secret-sentinel --baseline . --format sarif", step)
         self.assertIn("secret-sentinel . --format sarif", step)
 
-    def test_readme_workflow_example_scans_pr_diff_without_credentials(self) -> None:
+    def test_readme_workflow_example_scans_pr_range_without_credentials(self) -> None:
         """The copyable README workflow should implement the same safe PR scan."""
         section_start = self.readme.index("### GitHub Actions")
         section_end = self.readme.index("### Output Formats", section_start)
@@ -74,7 +78,9 @@ class TestGitHubWorkflow(unittest.TestCase):
         self.assertIn("permissions:\n  contents: read", example)
         self.assertIn("fetch-depth: 0", example)
         self.assertIn("PR_BASE_REF: ${{ github.base_ref }}", example)
-        self.assertIn('secret-sentinel --diff "origin/$PR_BASE_REF"', example)
+        self.assertIn(
+            'secret-sentinel --commit-range "origin/$PR_BASE_REF" HEAD', example
+        )
         self.assertNotIn("SECRET_SENTINEL_BASELINE_KEY", example)
         self.assertNotIn("secrets.", example)
         self.assertIn(
