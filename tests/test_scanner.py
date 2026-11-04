@@ -15,6 +15,8 @@ from secret_sentinel.scanner import (
     _line_has_secret_keyword,
     _normalize_path,
     _sanitize_source_path,
+    audit_suppressions_in_repo,
+    audit_suppressions_text,
     get_git_root,
     get_staged_content,
     get_staged_paths,
@@ -422,6 +424,83 @@ class TestScanner(unittest.TestCase):
         issues = scan_text(content, "test.py")
         self.assertEqual(len(issues), 1)
         self.assertEqual(issues[0]["line"], 2)
+
+    def test_audit_suppressions_text_reports_documented_active_directives(self) -> None:
+        """A used suppression with a reason and future expiry is healthy."""
+        content = (
+            f'aws_key = "{DUMMY_AWS}"  # secret-sentinel: ignore '
+            "reason: synthetic test fixture; expires: 2999-12-31\n"
+            "# secret-sentinel: disable-next-line reason: fixture; expires: 2999-12-31\n"
+            f'aws_key = "{DUMMY_AWS}"\n'
+        )
+
+        suppressions = audit_suppressions_text(content, "test.py")
+
+        self.assertEqual(
+            [item["statuses"] for item in suppressions],
+            [["active"], ["active"]],
+        )
+        self.assertEqual([item["target_line"] for item in suppressions], [1, 3])
+        self.assertNotIn(DUMMY_AWS, repr(suppressions))
+
+    def test_audit_suppressions_text_reports_metadata_and_usage_problems(self) -> None:
+        """Missing, invalid, expired, and unused suppressions are actionable."""
+        content = (
+            "# secret-sentinel: ignore\n"
+            "# secret-sentinel: ignore reason: obsolete; expires: 2000-01-01\n"
+            "# secret-sentinel: ignore reason: malformed; expires: not-a-date\n"
+            "# secret-sentinel: disable-next-line\n"
+        )
+
+        suppressions = audit_suppressions_text(content, "test.py")
+
+        self.assertEqual(
+            [item["statuses"] for item in suppressions],
+            [
+                ["missing-reason", "missing-expiry", "unused"],
+                ["expired"],
+                ["invalid-expiry"],
+                ["missing-reason", "missing-expiry", "unused"],
+            ],
+        )
+        self.assertIsNone(suppressions[-1]["target_line"])
+
+    def test_audit_suppressions_in_repo_honors_ignores(self) -> None:
+        """Repository audits skip ignored paths and report relative locations."""
+        with tempfile.TemporaryDirectory() as repo_root:
+            included = os.path.join(repo_root, "src", "module.py")
+            ignored = os.path.join(repo_root, "ignored", "module.py")
+            os.makedirs(os.path.dirname(included))
+            os.makedirs(os.path.dirname(ignored))
+            with open(included, "w", encoding="utf-8") as handle:
+                handle.write("# secret-sentinel: ignore\n")
+            with open(ignored, "w", encoding="utf-8") as handle:
+                handle.write("# secret-sentinel: ignore\n")
+
+            suppressions = audit_suppressions_in_repo(
+                repo_root, ignore_globs=["ignored/*"]
+            )
+
+        self.assertEqual(len(suppressions), 1)
+        self.assertEqual(suppressions[0]["source"], "src/module.py")
+
+    def test_audit_suppressions_text_uses_custom_rules_for_matching(self) -> None:
+        """A custom detector match makes a next-line suppression active."""
+        custom_rule = CustomRule(
+            "Fixture Token",
+            re.compile(r"fixture_[A-Z0-9]{8}"),
+            SeverityLevel.HIGH,
+        )
+        content = (
+            "# secret-sentinel: disable-next-line reason: fixture; expires: 2999-12-31\n"
+            'value = "fixture_A1B2C3D4"\n'
+        )
+
+        suppressions = audit_suppressions_text(
+            content, "test.py", custom_rules=[custom_rule]
+        )
+
+        self.assertEqual(suppressions[0]["statuses"], ["active"])
 
     def test_scan_text_detects_generic_secret(self) -> None:
         """Detect generic secret assignments."""

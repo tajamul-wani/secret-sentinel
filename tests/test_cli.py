@@ -39,6 +39,10 @@ class TestCLI(unittest.TestCase):
         """Parse the interactive setup guide option."""
         self.assertTrue(parse_args(["--setup"]).setup)
 
+    def test_parse_args_audit_suppressions(self) -> None:
+        """Parse the read-only suppression audit command."""
+        self.assertTrue(parse_args(["--audit-suppressions"]).audit_suppressions)
+
     def test_parse_args_defaults(self) -> None:
         """Default arguments should have empty paths and staged false."""
         args = parse_args([])
@@ -374,6 +378,63 @@ class TestCLI(unittest.TestCase):
             with redirect_stdout(output):
                 self.assertEqual(main(["--doctor"]), 1)
         self.assertIn("Git repository: not found", output.getvalue())
+
+    def test_main_audit_suppressions_reports_clean_directive_without_leaking(self) -> None:
+        """A documented, used suppression passes audit without exposing its value."""
+        with tempfile.TemporaryDirectory() as repo_root:
+            secret = DUMMY_AWS
+            Path(repo_root, "fixture.py").write_text(
+                f'aws_key = "{secret}"  # secret-sentinel: ignore '
+                "reason: synthetic test fixture; expires: 2999-12-31\n",
+                encoding="utf-8",
+            )
+            output = StringIO()
+            with (
+                patch("secret_sentinel.cli.get_git_root", return_value=repo_root),
+                redirect_stdout(output),
+            ):
+                result = main(["--audit-suppressions"])
+
+        self.assertEqual(result, 0)
+        self.assertIn("fixture.py:1 [ACTIVE]", output.getvalue())
+        self.assertIn(
+            "All 1 suppression(s) are documented and in use.", output.getvalue()
+        )
+        self.assertNotIn(secret, output.getvalue())
+
+    def test_main_audit_suppressions_fails_for_directives_needing_review(self) -> None:
+        """An undocumented and unused directive is reported as a failing audit."""
+        with tempfile.TemporaryDirectory() as repo_root:
+            Path(repo_root, "fixture.py").write_text(
+                "# secret-sentinel: ignore\n", encoding="utf-8"
+            )
+            output = StringIO()
+            with (
+                patch("secret_sentinel.cli.get_git_root", return_value=repo_root),
+                redirect_stdout(output),
+            ):
+                result = main(["--audit-suppressions"])
+
+        self.assertEqual(result, 1)
+        self.assertIn(
+            "[MISSING REASON, MISSING EXPIRY, UNUSED]", output.getvalue()
+        )
+        self.assertIn("1 suppression(s) need review", output.getvalue())
+
+    def test_main_audit_suppressions_reports_empty_repository(self) -> None:
+        """An audit with no directives succeeds with a clear message."""
+        with tempfile.TemporaryDirectory() as repo_root:
+            with (
+                patch("secret_sentinel.cli.get_git_root", return_value=repo_root),
+                redirect_stdout(StringIO()) as output,
+            ):
+                self.assertEqual(main(["--audit-suppressions"]), 0)
+        self.assertIn("No inline suppression directives found.", output.getvalue())
+
+    def test_main_audit_suppressions_rejects_other_modes(self) -> None:
+        """Suppression audit cannot silently ignore another command's options."""
+        with patch("secret_sentinel.cli.get_git_root", return_value=None):
+            self.assertEqual(main(["--audit-suppressions", "--doctor"]), 2)
 
     def test_main_setup_commands_reject_unrelated_options(self) -> None:
         """Setup commands should reject options that would otherwise be ignored."""

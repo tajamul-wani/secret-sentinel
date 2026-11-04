@@ -109,6 +109,20 @@ Skip AI validation:
 secret-sentinel --staged --no-ai
 ```
 
+Audit inline suppressions:
+
+```bash
+secret-sentinel --audit-suppressions
+```
+
+The read-only audit checks suppressions across readable text files in the
+repository, honoring configured ignored paths and custom rules. It reports
+missing reasons or expiries, invalid or expired dates, and directives that no
+longer match a finding. A directive passes only when it has a reason, an expiry
+date that has not passed, and still suppresses a finding. Findings and source
+contents are never included in the audit output. The command exits with status
+1 when any suppression needs review.
+
 Check the setup without changing repository files:
 
 ```bash
@@ -283,19 +297,17 @@ Reported snippets remain redacted.
 For a confirmed false positive or intentional test fixture, prefer a
 line-specific directive with a short reason and expiry:
 
-```python
-# Ignore finding on the current line
-api_key = "dummy_mock_key"  # secret-sentinel: ignore reason: synthetic fixture
+For a finding on the same line, append a language-appropriate comment containing
+`secret-sentinel: ignore`, followed by `reason:` and `expires: YYYY-MM-DD`.
+For the following line, put `secret-sentinel: disable-next-line` with the same
+metadata in a comment on the preceding line.
 
-# Ignore finding on the subsequent line
-# secret-sentinel: disable-next-line reason: generated test data; expires: 2027-01-31
-api_key = "dummy_mock_key"
-```
-
-C-style comments (`// secret-sentinel: ignore` or `/* secret-sentinel: ignore */`)
-are also supported. Reasons and expiry dates are optional, and existing bare
-directives remain supported. Use `expires: YYYY-MM-DD` to make a suppression
-temporary; expired or invalid dates no longer suppress findings.
+C-style line and block comments are also supported. Reasons and expiry dates
+are optional, and existing bare directives remain supported. Use
+`expires: YYYY-MM-DD` to make a suppression temporary; expired or invalid
+dates no longer suppress findings.
+Run `secret-sentinel --audit-suppressions` periodically to find old or
+undocumented directives without exposing source text or detected values.
 
 ### Using with the `pre-commit` Framework
 
