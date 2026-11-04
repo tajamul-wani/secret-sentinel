@@ -23,6 +23,7 @@ from secret_sentinel.scanner import (
     scan_paths,
     scan_git_diff,
     scan_git_history,
+    scan_git_push_updates,
     scan_staged_files,
     scan_text,
     summarize_issues,
@@ -200,6 +201,131 @@ class TestScanner(unittest.TestCase):
         with tempfile.TemporaryDirectory() as repo_root:
             with self.assertRaisesRegex(RuntimeError, "Unable to read repository history"):
                 scan_git_history(repo_root)
+
+    def test_scan_git_push_updates_scans_only_commits_not_on_remote(self) -> None:
+        """Pushed ranges omit findings already reachable from the remote SHA."""
+        with tempfile.TemporaryDirectory() as repo_root:
+            self._initialize_history_repo(repo_root)
+            remote_commit = self._commit_file(
+                repo_root, "existing.py", f'key = "{DUMMY_AWS}"\n'.encode()
+            )
+            pushed_commit = self._commit_file(
+                repo_root, "notes.txt", b"new commit without findings\n"
+            )
+            updates = (
+                f"refs/heads/main {pushed_commit} "
+                f"refs/heads/main {remote_commit}\n"
+            )
+
+            issues = scan_git_push_updates(repo_root, updates)
+
+        self.assertEqual(issues, [])
+
+    def test_scan_git_push_updates_scans_new_branch_ancestry(self) -> None:
+        """A new branch push scans its commits even without a remote SHA."""
+        with tempfile.TemporaryDirectory() as repo_root:
+            self._initialize_history_repo(repo_root)
+            pushed_commit = self._commit_file(
+                repo_root,
+                "config with spaces.py",
+                f'aws_key = "{DUMMY_AWS}"\n'.encode(),
+            )
+            updates = (
+                f"refs/heads/new {pushed_commit} "
+                f"refs/heads/new {'0' * 40}\n"
+            )
+
+            issues = scan_git_push_updates(repo_root, updates)
+
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(issues[0]["source"], "config with spaces.py")
+        self.assertEqual(issues[0]["commit"], pushed_commit)
+
+    def test_scan_git_push_updates_scans_merge_resolution_changes(self) -> None:
+        """A finding introduced by merge resolution is scanned for a push."""
+        with tempfile.TemporaryDirectory() as repo_root:
+            self._initialize_history_repo(repo_root)
+            self._commit_file(repo_root, "config.py", b"value = 'base'\n")
+            main_branch = self._run_git(repo_root, "branch", "--show-current")
+            self._run_git(repo_root, "checkout", "-q", "-b", "remote-side")
+            remote_commit = self._commit_file(
+                repo_root, "config.py", b"value = 'side'\n"
+            )
+            self._run_git(repo_root, "checkout", "-q", main_branch)
+            self._commit_file(repo_root, "config.py", b"value = 'main'\n")
+            merge = subprocess.run(
+                ["git", "merge", "--no-ff", "-m", "test merge", "remote-side"],
+                cwd=repo_root,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertNotEqual(merge.returncode, 0)
+            with open(
+                os.path.join(repo_root, "config.py"), "w", encoding="utf-8"
+            ) as handle:
+                handle.write(f'aws_key = "{DUMMY_AWS}"\n')
+            self._run_git(repo_root, "add", "--", "config.py")
+            self._run_git(repo_root, "commit", "-q", "-m", "resolve merge")
+            local_commit = self._run_git(repo_root, "rev-parse", "HEAD")
+            updates = (
+                f"refs/heads/main {local_commit} "
+                f"refs/heads/remote-side {remote_commit}\n"
+            )
+
+            issues = scan_git_push_updates(repo_root, updates)
+
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(issues[0]["commit"], local_commit)
+
+    def test_scan_git_push_updates_handles_deletions_and_multiple_refs(self) -> None:
+        """Deleted refs are skipped and duplicate update commits scan once."""
+        with tempfile.TemporaryDirectory() as repo_root:
+            self._initialize_history_repo(repo_root)
+            pushed_commit = self._commit_file(
+                repo_root, "config.py", f'aws_key = "{DUMMY_AWS}"\n'.encode()
+            )
+            updates = (
+                f"refs/heads/deleted {'0' * 40} "
+                f"refs/heads/deleted {pushed_commit}\n"
+                f"refs/heads/first {pushed_commit} "
+                f"refs/heads/first {'0' * 40}\n"
+                f"refs/heads/second {pushed_commit} "
+                f"refs/heads/second {'0' * 40}\n"
+            )
+
+            issues = scan_git_push_updates(repo_root, updates)
+
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(issues[0]["commit"], pushed_commit)
+
+    def test_scan_git_push_updates_rejects_malformed_input(self) -> None:
+        """Malformed pre-push input must fail explicitly."""
+        with tempfile.TemporaryDirectory() as repo_root:
+            self._initialize_history_repo(repo_root)
+            with self.assertRaisesRegex(RuntimeError, "Invalid pre-push update data"):
+                scan_git_push_updates(repo_root, "not a valid update\n")
+
+    def test_scan_git_push_updates_detects_secret_removed_before_push(self) -> None:
+        """A finding in an intermediate pushed commit remains detectable."""
+        with tempfile.TemporaryDirectory() as repo_root:
+            self._initialize_history_repo(repo_root)
+            remote_commit = self._commit_file(repo_root, "README.txt", b"clean\n")
+            secret_commit = self._commit_file(
+                repo_root, "config.py", f'aws_key = "{DUMMY_AWS}"\n'.encode()
+            )
+            clean_commit = self._commit_file(
+                repo_root, "config.py", b'aws_key = "removed"\n'
+            )
+            updates = (
+                f"refs/heads/main {clean_commit} "
+                f"refs/heads/main {remote_commit}\n"
+            )
+
+            issues = scan_git_push_updates(repo_root, updates)
+
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(issues[0]["commit"], secret_commit)
 
     def test_scan_git_diff_reports_only_added_secret_lines(self) -> None:
         """Existing findings are omitted when their lines are unchanged."""
