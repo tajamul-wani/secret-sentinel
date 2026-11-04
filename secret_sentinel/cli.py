@@ -533,10 +533,20 @@ def run_pre_push_scan(repo_root: Optional[str], updates: str) -> int:
 
     report = format_text(issues, fail_on=config.fail_on)
     print(report)
-    if not issues:
-        return 0
-    overall_severity = calculate_overall_severity(issues)
-    return int(overall_severity.value >= config.fail_on.value)
+    should_block = bool(
+        issues
+        and calculate_overall_severity(issues).value >= config.fail_on.value
+    )
+    try:
+        ScanHistory(repo_root).record_scan(
+            issues,
+            scan_type="pre-push",
+            status="blocked" if should_block else "completed",
+        )
+    except OSError:
+        logger.error("Pre-push scan could not record history; commits were not pushed.")
+        return 1
+    return int(should_block)
 
 
 def run_suppression_audit(

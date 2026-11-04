@@ -363,7 +363,10 @@ secret-sentinel --stats
 secret-sentinel --clear-history
 ```
 
-History is stored locally in `.secret-sentinel/scan_history.jsonl` and includes timestamps, issue counts, and severity breakdowns.
+History is stored locally in `.secret-sentinel/scan_history.jsonl` and includes
+timestamps, issue counts, and severity breakdowns. Pre-push scans are recorded
+as `pre-push`, with a `blocked` status when findings meet the configured
+threshold.
 
 ### Installing Git Hook
 
