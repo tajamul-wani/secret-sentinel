@@ -123,6 +123,17 @@ date that has not passed, and still suppresses a finding. Findings and source
 contents are never included in the audit output. The command exits with status
 1 when any suppression needs review.
 
+For CI integrations, emit JSON or SARIF and optionally save the report:
+
+```bash
+secret-sentinel --audit-suppressions --format json --output suppressions.json
+secret-sentinel --audit-suppressions --format sarif --output suppressions.sarif
+```
+
+Machine-readable reports contain only relative paths, directive and target line
+numbers, and audit statuses. The exit code remains 1 when suppressions need
+review, including when a report is written to a file.
+
 Check the setup without changing repository files:
 
 ```bash

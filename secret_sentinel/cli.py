@@ -12,7 +12,14 @@ from typing import Any, Dict, List, Optional
 from .ai_validator import validate_issues
 from .baseline import ScanBaseline
 from .config import CustomRule, SecretSentinelConfig
-from .formatters import format_json, format_sarif, format_text
+from .formatters import (
+    format_json,
+    format_sarif,
+    format_suppression_audit_json,
+    format_suppression_audit_sarif,
+    format_suppression_audit_text,
+    format_text,
+)
 from .history import ScanHistory
 from .risk_scoring import SeverityLevel, calculate_overall_severity
 from .scanner import (
@@ -408,7 +415,11 @@ def run_doctor(repo_root: Optional[str]) -> int:
     return 1 if baseline_error else 0
 
 
-def run_suppression_audit(repo_root: Optional[str]) -> int:
+def run_suppression_audit(
+    repo_root: Optional[str],
+    output_format: str = "text",
+    output_path: Optional[str] = None,
+) -> int:
     """Report undocumented, expired, or unused inline suppressions."""
     if repo_root is None:
         logger.error(
@@ -427,39 +438,24 @@ def run_suppression_audit(repo_root: Optional[str]) -> int:
         logger.error("Suppression audit failed; repository files could not be checked.")
         return 1
 
-    if not suppressions:
-        print("No inline suppression directives found.")
-        return 0
-
-    print("Suppression audit")
-    problem_count = 0
-    for suppression in suppressions:
-        statuses = suppression["statuses"]
-        if statuses != ["active"]:
-            problem_count += 1
-        status_text = ", ".join(
-            status.replace("-", " ").upper() for status in statuses
-        )
-        target_line = suppression["target_line"]
-        target = (
-            f" -> line {target_line}"
-            if target_line is not None and target_line != suppression["line"]
-            else ""
-        )
-        print(
-            f"{suppression['source']}:{suppression['line']}{target} "
-            f"[{status_text}]"
-        )
-
-    if problem_count:
-        print(
-            f"{problem_count} suppression(s) need review; "
-            "remove obsolete directives or add a reason and future expiry."
-        )
-        return 1
-
-    print(f"All {len(suppressions)} suppression(s) are documented and in use.")
-    return 0
+    formatters = {
+        "text": format_suppression_audit_text,
+        "json": format_suppression_audit_json,
+        "sarif": format_suppression_audit_sarif,
+    }
+    report = formatters[output_format](suppressions)
+    if output_path:
+        try:
+            with open(output_path, "w", encoding="utf-8") as handle:
+                handle.write(report + "\n")
+        except OSError:
+            logger.error("Failed to write suppression audit report.")
+            return 1
+    else:
+        print(report)
+    return int(
+        any(suppression["statuses"] != ["active"] for suppression in suppressions)
+    )
 
 
 def run_setup(repo_root: Optional[str]) -> int:
@@ -699,14 +695,14 @@ def main(argv: Optional[List[str]] = None) -> int:
             or args.no_ai
             or args.fail_on is not None
             or args.history_limit != 10
-            or args.output
-            or args.format != "text"
         ):
             logger.error(
                 "--audit-suppressions cannot be combined with scan or management options."
             )
             return 2
-        return run_suppression_audit(git_root)
+        return run_suppression_audit(
+            git_root, output_format=args.format, output_path=args.output
+        )
 
     if args.setup:
         if (

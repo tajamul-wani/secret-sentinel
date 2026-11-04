@@ -278,3 +278,143 @@ def format_sarif(
             "baselineSuppressed": baseline_suppressed
         }
     return json.dumps(sarif_log, indent=2)
+
+
+def format_suppression_audit_text(
+    suppressions: List[Dict[str, Any]],
+) -> str:
+    """Format suppression audit records as human-readable text."""
+    if not suppressions:
+        return "No inline suppression directives found."
+
+    problem_count = sum(
+        suppression.get("statuses") != ["active"]
+        for suppression in suppressions
+    )
+    lines = ["Suppression audit"]
+    for suppression in suppressions:
+        statuses = suppression.get("statuses", [])
+        status_text = ", ".join(
+            str(status).replace("-", " ").upper() for status in statuses
+        )
+        line = f"{suppression.get('source', '')}:{suppression.get('line', '')}"
+        target_line = suppression.get("target_line")
+        if target_line is not None and target_line != suppression.get("line"):
+            line += f" -> line {target_line}"
+        lines.append(f"{line} [{status_text}]")
+
+    if problem_count:
+        lines.append(
+            f"{problem_count} suppression(s) need review; "
+            "remove obsolete directives or add a reason and future expiry."
+        )
+    else:
+        lines.append(
+            f"All {len(suppressions)} suppression(s) are documented and in use."
+        )
+    return "\n".join(lines)
+
+
+def format_suppression_audit_json(
+    suppressions: List[Dict[str, Any]],
+) -> str:
+    """Format suppression audit records as secret-free JSON."""
+    needs_review = sum(
+        suppression.get("statuses") != ["active"]
+        for suppression in suppressions
+    )
+    report = {
+        "status": "review" if needs_review else "passed",
+        "total_suppressions": len(suppressions),
+        "needs_review": needs_review,
+        "suppressions": [
+            {
+                "source": suppression.get("source"),
+                "line": suppression.get("line"),
+                "target_line": suppression.get("target_line"),
+                "statuses": suppression.get("statuses", []),
+            }
+            for suppression in suppressions
+        ],
+    }
+    return json.dumps(report, indent=2)
+
+
+def format_suppression_audit_sarif(
+    suppressions: List[Dict[str, Any]],
+) -> str:
+    """Format suppression audit records as SARIF v2.1.0 diagnostics."""
+    rules = [
+        {
+            "id": "suppression-active",
+            "name": "ActiveSuppression",
+            "shortDescription": {"text": "Documented active suppression"},
+            "defaultConfiguration": {"level": "note"},
+        },
+        {
+            "id": "suppression-review",
+            "name": "SuppressionNeedsReview",
+            "shortDescription": {"text": "Suppression needs review"},
+            "defaultConfiguration": {"level": "warning"},
+        },
+    ]
+    results: List[Dict[str, Any]] = []
+    for suppression in suppressions:
+        statuses = suppression.get("statuses", [])
+        needs_review = statuses != ["active"]
+        status_text = ", ".join(
+            str(status).replace("-", " ") for status in statuses
+        )
+        result: Dict[str, Any] = {
+            "ruleId": "suppression-review" if needs_review else "suppression-active",
+            "level": "warning" if needs_review else "note",
+            "message": {
+                "text": (
+                    f"Suppression needs review: {status_text}."
+                    if needs_review
+                    else "Suppression is documented and active."
+                )
+            },
+            "locations": [
+                {
+                    "physicalLocation": {
+                        "artifactLocation": {
+                            "uri": str(suppression.get("source", "")),
+                            "uriBaseId": "%SRCROOT%",
+                        },
+                        "region": {
+                            "startLine": int(suppression.get("line", 1))
+                        },
+                    }
+                }
+            ],
+            "properties": {"statuses": statuses},
+        }
+        target_line = suppression.get("target_line")
+        if target_line is not None:
+            result["properties"]["targetLine"] = target_line
+        results.append(result)
+
+    sarif_log = {
+        "$schema": (
+            "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/"
+            "Schemata/sarif-schema-2.1.0.json"
+        ),
+        "version": "2.1.0",
+        "runs": [
+            {
+                "tool": {
+                    "driver": {
+                        "name": "secret-sentinel",
+                        "version": "0.1.0",
+                        "informationUri": (
+                            "https://github.com/tajamul-wani/secret-sentinel"
+                        ),
+                        "rules": rules,
+                    }
+                },
+                "results": results,
+            }
+        ],
+    }
+    return json.dumps(sarif_log, indent=2)
