@@ -8,6 +8,7 @@ It is designed to work without requiring a cloud API or environment variables fo
 
 - scans staged files before commit
 - scans selected files or folders manually
+- can scan commits before they are pushed
 - looks for common secret formats and high-entropy strings
 - can optionally use AI validation when available
 - can be installed as a Git pre-commit hook
@@ -34,9 +35,9 @@ From the Git repository where you want to enable scanning, run:
 secret-sentinel --setup
 ```
 
-The interactive guide helps you choose a local scan, pre-commit hook, baseline,
-or GitHub Actions workflow. It does not change repository files unless you
-choose to install the hook and confirm the installation.
+The interactive guide helps you choose a local scan, pre-commit or pre-push
+hook, baseline, or GitHub Actions workflow. It does not change repository files
+unless you choose to install a hook and confirm the installation.
 
 To install only the pre-commit hook directly, run:
 
@@ -51,6 +52,18 @@ pass `--yes` to confirm explicitly:
 ```bash
 secret-sentinel --init --yes
 ```
+
+To install a pre-push hook that checks commits being sent to a remote:
+
+```bash
+secret-sentinel --install-pre-push-hook
+```
+
+The pre-push hook scans commits introduced by each ref update, including the
+history of a new branch. It skips commits already reachable from the updated
+remote ref and handles deleted refs without scanning. A finding blocks the
+push; reported values are redacted. This is a local check and does not change
+remote refs or rewrite history.
 
 After setup, the command confirms the hook is active and suggests a working-tree
 scan or a setup check with `secret-sentinel --doctor`.
@@ -368,6 +381,15 @@ secret-sentinel --uninstall-hook
 
 The installer will not overwrite an existing hook unless it is marked as managed
 by Secret Sentinel. Uninstalling removes only a Secret Sentinel-managed hook.
+
+Install or remove the separate pre-push hook with:
+
+```bash
+secret-sentinel --install-pre-push-hook
+secret-sentinel --uninstall-pre-push-hook
+```
+
+Both hooks are independently managed and neither replaces an unmanaged hook.
 
 ## Use inside another project
 

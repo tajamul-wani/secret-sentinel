@@ -30,12 +30,14 @@ from .scanner import (
     scan_paths as scan_disk_paths,
     scan_git_diff,
     scan_git_history,
+    scan_git_push_updates,
     scan_staged_files,
     summarize_issues,
 )
 
 logger = logging.getLogger("secret_sentinel")
 HOOK_MARKER = "# secret-sentinel managed hook"
+PRE_PUSH_HOOK_MARKER = "# secret-sentinel managed pre-push hook"
 
 
 def setup_logging(debug: bool = False) -> None:
@@ -64,7 +66,7 @@ def build_parser() -> argparse.ArgumentParser:
     """
     parser = argparse.ArgumentParser(
         prog="secret-sentinel",
-        description="Local AI-assisted secret scanner for Git pre-commit hooks.",
+        description="Local secret scanner with Git pre-commit and pre-push hooks.",
         epilog=(
             "Quick start:\n"
             "  secret-sentinel --setup   Choose a setup path\n"
@@ -124,6 +126,21 @@ def build_parser() -> argparse.ArgumentParser:
         "--uninstall-hook",
         action="store_true",
         help="Remove the secret-sentinel Git pre-commit hook if installed.",
+    )
+    parser.add_argument(
+        "--install-pre-push-hook",
+        action="store_true",
+        help="Install Secret Sentinel as a Git pre-push hook.",
+    )
+    parser.add_argument(
+        "--uninstall-pre-push-hook",
+        action="store_true",
+        help="Remove the Secret Sentinel Git pre-push hook if installed.",
+    )
+    parser.add_argument(
+        "--pre-push",
+        action="store_true",
+        help=argparse.SUPPRESS,
     )
     parser.add_argument(
         "--debug",
@@ -233,20 +250,7 @@ def install_git_hook(repo_root: str) -> None:
     Args:
         repo_root: Root path of the Git repository.
     """
-    try:
-        hook_path = _get_git_hook_path(repo_root)
-        if not hook_path.parent.is_dir():
-            logger.error("No Git hooks directory found in repository.")
-            sys.exit(1)
-        if os.path.lexists(hook_path):
-            if hook_path.is_symlink():
-                logger.error("An existing pre-commit hook cannot be replaced.")
-                sys.exit(1)
-            with hook_path.open("r", encoding="utf-8", errors="replace") as handle:
-                if HOOK_MARKER not in handle.read():
-                    logger.error("An existing pre-commit hook cannot be replaced.")
-                    sys.exit(1)
-        hook_contents = """#!/usr/bin/env python3
+    hook_contents = """#!/usr/bin/env python3
 import sys
 from pathlib import Path
 
@@ -260,10 +264,53 @@ from secret_sentinel.cli import main
 if __name__ == "__main__":
     sys.exit(main(["--no-ai", "--staged"]))
 """
+    _install_git_hook(repo_root, "pre-commit", HOOK_MARKER, hook_contents)
+
+
+def install_git_pre_push_hook(repo_root: str) -> None:
+    """Install the Git pre-push hook in the repository."""
+    hook_contents = """#!/usr/bin/env python3
+import sys
+from pathlib import Path
+
+""" + PRE_PUSH_HOOK_MARKER + """
+repo_root = Path.cwd().resolve()
+sys.path.insert(0, str(repo_root))
+
+from secret_sentinel.cli import main
+
+if __name__ == "__main__":
+    sys.exit(main(["--pre-push"]))
+"""
+    _install_git_hook(
+        repo_root, "pre-push", PRE_PUSH_HOOK_MARKER, hook_contents
+    )
+
+
+def _install_git_hook(
+    repo_root: str,
+    hook_name: str,
+    marker: str,
+    hook_contents: str,
+) -> None:
+    """Install a managed Git hook without replacing an unmanaged hook."""
+    try:
+        hook_path = _get_git_hook_path(repo_root, hook_name)
+        if not hook_path.parent.is_dir():
+            logger.error("No Git hooks directory found in repository.")
+            sys.exit(1)
+        if os.path.lexists(hook_path):
+            if hook_path.is_symlink():
+                logger.error("An existing %s hook cannot be replaced.", hook_name)
+                sys.exit(1)
+            with hook_path.open("r", encoding="utf-8", errors="replace") as handle:
+                if marker not in handle.read():
+                    logger.error("An existing %s hook cannot be replaced.", hook_name)
+                    sys.exit(1)
         with hook_path.open("w", encoding="utf-8") as handle:
             handle.write(hook_contents)
         os.chmod(hook_path, 0o755)
-        print(f"Installed pre-commit hook at {hook_path}")
+        print(f"Installed {hook_name} hook at {hook_path}")
     except OSError:
         logger.error("Failed to install Git hook.")
         sys.exit(1)
@@ -275,29 +322,52 @@ def uninstall_git_hook(repo_root: str) -> None:
     Args:
         repo_root: Root path of the Git repository.
     """
+    _uninstall_git_hook(repo_root, "pre-commit", HOOK_MARKER)
+
+
+def uninstall_git_pre_push_hook(repo_root: str) -> None:
+    """Remove the Secret Sentinel-managed Git pre-push hook if present."""
+    _uninstall_git_hook(repo_root, "pre-push", PRE_PUSH_HOOK_MARKER)
+
+
+def _uninstall_git_hook(repo_root: str, hook_name: str, marker: str) -> None:
+    """Remove a managed Git hook without disturbing unmanaged hooks."""
     try:
-        hook_path = _get_git_hook_path(repo_root)
+        hook_path = _get_git_hook_path(repo_root, hook_name)
         if os.path.lexists(hook_path):
             if hook_path.is_symlink():
-                logger.error("The existing pre-commit hook is not managed by Secret Sentinel.")
+                logger.error(
+                    "The existing %s hook is not managed by Secret Sentinel.",
+                    hook_name,
+                )
                 sys.exit(1)
             with hook_path.open("r", encoding="utf-8", errors="replace") as handle:
-                if HOOK_MARKER not in handle.read():
-                    logger.error("The existing pre-commit hook is not managed by Secret Sentinel.")
+                if marker not in handle.read():
+                    logger.error(
+                        "The existing %s hook is not managed by Secret Sentinel.",
+                        hook_name,
+                    )
                     sys.exit(1)
             os.remove(hook_path)
-            print(f"Removed pre-commit hook at {hook_path}")
+            print(f"Removed {hook_name} hook at {hook_path}")
         else:
-            print("No pre-commit hook found to remove.")
+            print(f"No {hook_name} hook found to remove.")
     except OSError:
         logger.error("Failed to uninstall Git hook.")
         sys.exit(1)
 
 
-def _get_git_hook_path(repo_root: str) -> Path:
-    """Return the repository's standard pre-commit hook path."""
+def _get_git_hook_path(repo_root: str, hook_name: str = "pre-commit") -> Path:
+    """Return the repository's path for a Git hook."""
     result = subprocess.run(
-        ["git", "-C", repo_root, "rev-parse", "--git-path", "hooks/pre-commit"],
+        [
+            "git",
+            "-C",
+            repo_root,
+            "rev-parse",
+            "--git-path",
+            f"hooks/{hook_name}",
+        ],
         capture_output=True,
         text=True,
         check=False,
@@ -307,7 +377,7 @@ def _get_git_hook_path(repo_root: str) -> Path:
         if not hook_path.is_absolute():
             hook_path = Path(repo_root) / hook_path
         return hook_path
-    return Path(repo_root) / ".git" / "hooks" / "pre-commit"
+    return Path(repo_root) / ".git" / "hooks" / hook_name
 
 
 def run_doctor(repo_root: Optional[str]) -> int:
@@ -362,6 +432,30 @@ def run_doctor(repo_root: Optional[str]) -> int:
         print("[WARN] Pre-commit hook: not installed (optional)")
         hook_needs_setup = True
 
+    pre_push_path = _get_git_hook_path(repo_root, "pre-push")
+    if pre_push_path.is_symlink():
+        print("[WARN] Pre-push hook: symbolic link present; left unchecked")
+        print("Review the linked hook manually; Secret Sentinel will not replace it.")
+    elif pre_push_path.is_file():
+        try:
+            with pre_push_path.open(
+                "r", encoding="utf-8", errors="replace"
+            ) as handle:
+                managed_pre_push = PRE_PUSH_HOOK_MARKER in handle.read()
+        except OSError:
+            print("[WARN] Pre-push hook: could not be checked")
+        else:
+            if managed_pre_push:
+                print("[ OK ] Pre-push hook: installed")
+            else:
+                print("[WARN] Pre-push hook: another hook is present")
+                print(
+                    "Keep the existing hook; combine the scanner with it manually "
+                    "if needed."
+                )
+    else:
+        print("[INFO] Pre-push hook: not installed (optional)")
+
     baseline_path = Path(repo_root) / ScanBaseline.DEFAULT_PATH
     baseline_error = False
     baseline_exists = baseline_path.exists() or baseline_path.is_symlink()
@@ -412,7 +506,37 @@ def run_doctor(repo_root: Optional[str]) -> int:
         print("Doctor checks passed.")
     if hook_needs_setup:
         print("Next: run `secret-sentinel --init` to add the optional pre-commit hook.")
+    if not os.path.lexists(pre_push_path):
+        print(
+            "Optional: run `secret-sentinel --install-pre-push-hook` to scan "
+            "commits before pushing."
+        )
     return 1 if baseline_error else 0
+
+
+def run_pre_push_scan(repo_root: Optional[str], updates: str) -> int:
+    """Scan commits Git is about to push and block pushes with findings."""
+    if repo_root is None:
+        logger.error("Pre-push scanning must run inside a Git repository.")
+        return 1
+    try:
+        config = SecretSentinelConfig.load(repo_root)
+        issues = scan_git_push_updates(
+            repo_root,
+            updates,
+            ignore_globs=config.ignore_globs,
+            custom_rules=config.custom_rules,
+        )
+    except (OSError, configparser.Error, RuntimeError, ValueError):
+        logger.error("Pre-push scan failed; commits were not pushed.")
+        return 1
+
+    report = format_text(issues, fail_on=config.fail_on)
+    print(report)
+    if not issues:
+        return 0
+    overall_severity = calculate_overall_severity(issues)
+    return int(overall_severity.value >= config.fail_on.value)
 
 
 def run_suppression_audit(
@@ -474,8 +598,9 @@ def run_setup(repo_root: Optional[str]) -> int:
     print("  2. Track existing findings with a baseline")
     print("  3. Add a GitHub Actions scan")
     print("  4. Show local scan commands")
+    print("  5. Install a pre-push hook")
     try:
-        choice = input("Select 1-4 [4]: ").strip() or "4"
+        choice = input("Select 1-5 [4]: ").strip() or "4"
     except EOFError:
         print("No changes were made.")
         return 0
@@ -508,15 +633,22 @@ def run_setup(repo_root: Optional[str]) -> int:
         print("Scan the working tree with `secret-sentinel .`.")
         print("Scan staged changes with `secret-sentinel --staged`.")
         return 0
+    if choice == "5":
+        return run_init(repo_root, hook_name="pre-push")
 
-    logger.error("Choose 1, 2, 3, or 4. No changes were made.")
+    logger.error("Choose 1, 2, 3, 4, or 5. No changes were made.")
     return 2
 
 
-def run_init(repo_root: Optional[str], assume_yes: bool = False) -> int:
-    """Install the pre-commit hook only after an explicit user confirmation."""
+def run_init(
+    repo_root: Optional[str],
+    assume_yes: bool = False,
+    hook_name: str = "pre-commit",
+) -> int:
+    """Install a supported Git hook only after explicit user confirmation."""
     if repo_root is None:
-        logger.error("Run `secret-sentinel --init` from inside a Git repository.")
+        command = "--init" if hook_name == "pre-commit" else "--setup"
+        logger.error("Run `secret-sentinel %s` inside a Git repository.", command)
         return 1
 
     try:
@@ -525,29 +657,41 @@ def run_init(repo_root: Optional[str], assume_yes: bool = False) -> int:
         logger.error("Configuration could not be loaded; no changes were made.")
         return 1
 
-    hook_path = _get_git_hook_path(repo_root)
+    marker = HOOK_MARKER if hook_name == "pre-commit" else PRE_PUSH_HOOK_MARKER
+    installer = (
+        install_git_hook if hook_name == "pre-commit" else install_git_pre_push_hook
+    )
+    hook_path = _get_git_hook_path(repo_root, hook_name)
     if hook_path.is_symlink():
-        logger.error("An existing pre-commit hook cannot be replaced.")
+        logger.error("An existing %s hook cannot be replaced.", hook_name)
         return 1
     if hook_path.is_file():
         try:
             with hook_path.open("r", encoding="utf-8", errors="replace") as handle:
-                managed = HOOK_MARKER in handle.read()
+                managed = marker in handle.read()
         except OSError:
-            logger.error("The existing pre-commit hook could not be checked.")
+            logger.error("The existing %s hook could not be checked.", hook_name)
             return 1
         if managed:
-            print("Secret Sentinel's pre-commit hook is already installed; no changes were made.")
+            print(
+                f"Secret Sentinel's {hook_name} hook is already installed; "
+                "no changes were made."
+            )
             return 0
-        logger.error("An existing pre-commit hook cannot be replaced.")
+        logger.error("An existing %s hook cannot be replaced.", hook_name)
         return 1
 
     if not assume_yes:
         if not sys.stdin.isatty():
-            logger.error("Use --yes to confirm setup when running non-interactively.")
+            if hook_name == "pre-commit":
+                logger.error("Use --yes to confirm setup when running non-interactively.")
+            else:
+                logger.error("Hook setup requires a terminal for confirmation.")
             return 2
         try:
-            answer = input("Install the Secret Sentinel pre-commit hook? [y/N] ")
+            answer = input(
+                f"Install the Secret Sentinel {hook_name} hook? [y/N] "
+            )
         except EOFError:
             print("No changes were made.")
             return 0
@@ -556,16 +700,20 @@ def run_init(repo_root: Optional[str], assume_yes: bool = False) -> int:
             return 0
 
     try:
-        install_git_hook(repo_root)
+        installer(repo_root)
     except SystemExit as exc:
         return int(exc.code) if isinstance(exc.code, int) else 1
 
-    print("Setup complete: the hook scans staged changes before each commit.")
-    print(
-        "Next: run `secret-sentinel .` to scan the working tree, "
-        "or `secret-sentinel --doctor` to check setup."
-    )
-    print("Baselines are optional; review existing findings before creating one.")
+    if hook_name == "pre-commit":
+        print("Setup complete: the hook scans staged changes before each commit.")
+        print(
+            "Next: run `secret-sentinel .` to scan the working tree, "
+            "or `secret-sentinel --doctor` to check setup."
+        )
+        print("Baselines are optional; review existing findings before creating one.")
+    else:
+        print("Setup complete: the hook scans newly pushed commits before each push.")
+        print("Run `secret-sentinel --doctor` to check hook setup.")
     return 0
 
 
@@ -674,6 +822,42 @@ def main(argv: Optional[List[str]] = None) -> int:
         logger.error("--yes can only be used with --init.")
         return 2
 
+    if args.pre_push:
+        if (
+            args.paths
+            or args.setup
+            or args.doctor
+            or args.audit_suppressions
+            or args.init
+            or args.yes
+            or args.staged
+            or args.git_history
+            or args.diff is not None
+            or args.all_refs
+            or args.baseline
+            or args.update_baseline
+            or args.history
+            or args.stats
+            or args.clear_history
+            or args.install_hook
+            or args.uninstall_hook
+            or args.install_pre_push_hook
+            or args.uninstall_pre_push_hook
+            or args.no_ai
+            or args.fail_on is not None
+            or args.history_limit != 10
+            or args.output
+            or args.format != "text"
+        ):
+            logger.error("--pre-push cannot be combined with other options.")
+            return 2
+        try:
+            updates = sys.stdin.read()
+        except OSError:
+            logger.error("Could not read pre-push update data.")
+            return 1
+        return run_pre_push_scan(git_root, updates)
+
     if args.audit_suppressions:
         if (
             args.paths
@@ -692,6 +876,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             or args.clear_history
             or args.install_hook
             or args.uninstall_hook
+            or args.install_pre_push_hook
+            or args.uninstall_pre_push_hook
             or args.no_ai
             or args.fail_on is not None
             or args.history_limit != 10
@@ -721,6 +907,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             or args.clear_history
             or args.install_hook
             or args.uninstall_hook
+            or args.install_pre_push_hook
+            or args.uninstall_pre_push_hook
             or args.no_ai
             or args.fail_on is not None
             or args.history_limit != 10
@@ -748,6 +936,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             or args.clear_history
             or args.install_hook
             or args.uninstall_hook
+            or args.install_pre_push_hook
+            or args.uninstall_pre_push_hook
             or args.no_ai
             or args.fail_on is not None
             or args.history_limit != 10
@@ -773,6 +963,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             or args.clear_history
             or args.install_hook
             or args.uninstall_hook
+            or args.install_pre_push_hook
+            or args.uninstall_pre_push_hook
             or args.no_ai
             or args.fail_on is not None
             or args.history_limit != 10
@@ -847,11 +1039,47 @@ def main(argv: Optional[List[str]] = None) -> int:
                 print(f"\nLatest scan: {latest['timestamp']}")
             return 0
 
-    if args.install_hook:
-        install_git_hook(repo_root)
-        return 0
-    if args.uninstall_hook:
-        uninstall_git_hook(repo_root)
+    hook_actions = [
+        args.install_hook,
+        args.uninstall_hook,
+        args.install_pre_push_hook,
+        args.uninstall_pre_push_hook,
+    ]
+    if any(hook_actions):
+        if (
+            sum(hook_actions) != 1
+            or args.paths
+            or args.pre_push
+            or args.setup
+            or args.doctor
+            or args.audit_suppressions
+            or args.init
+            or args.yes
+            or args.staged
+            or args.git_history
+            or args.diff is not None
+            or args.all_refs
+            or args.baseline
+            or args.update_baseline
+            or args.history
+            or args.stats
+            or args.clear_history
+            or args.no_ai
+            or args.fail_on is not None
+            or args.history_limit != 10
+            or args.output
+            or args.format != "text"
+        ):
+            logger.error("Git hook management cannot be combined with other options.")
+            return 2
+        if args.install_hook:
+            install_git_hook(repo_root)
+        elif args.uninstall_hook:
+            uninstall_git_hook(repo_root)
+        elif args.install_pre_push_hook:
+            install_git_pre_push_hook(repo_root)
+        else:
+            uninstall_git_pre_push_hook(repo_root)
         return 0
 
     try:
