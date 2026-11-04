@@ -492,14 +492,125 @@ def scan_git_history(
     if commits_result.returncode != 0:
         raise RuntimeError("Unable to read repository history for scanning.")
 
+    return _scan_git_commits(
+        repo_root,
+        commits_result.stdout.splitlines(),
+        ignore_globs=ignore_globs,
+        custom_rules=custom_rules,
+    )
+
+
+def scan_git_push_updates(
+    repo_root: str,
+    updates: str,
+    ignore_globs: Optional[List[str]] = None,
+    custom_rules: Optional[List[CustomRule]] = None,
+) -> List[Dict[str, Any]]:
+    """Scan commits introduced by Git pre-push ref updates.
+
+    Args:
+        repo_root: Repository directory.
+        updates: Git pre-push hook update lines from standard input.
+        ignore_globs: Optional path patterns to exclude.
+        custom_rules: Optional configured detection rules.
+
+    Returns:
+        Findings in commits reachable from local refs but not their remote refs.
+
+    Raises:
+        RuntimeError: If update input or repository history cannot be read.
+    """
+    zero_sha_by_length = {"0" * 40, "0" * 64}
+    commit_pattern = re.compile(r"^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$")
+    commits: List[str] = []
+    seen_commits: set[str] = set()
+
+    for update in updates.splitlines():
+        if not update.strip():
+            continue
+        fields = update.split()
+        if len(fields) != 4:
+            raise RuntimeError("Invalid pre-push update data.")
+
+        _local_ref, local_sha, _remote_ref, remote_sha = fields
+        if (
+            not commit_pattern.fullmatch(local_sha)
+            or not commit_pattern.fullmatch(remote_sha)
+            or len(local_sha) != len(remote_sha)
+        ):
+            raise RuntimeError("Invalid pre-push update data.")
+        if local_sha in zero_sha_by_length:
+            continue
+
+        revisions = [local_sha]
+        if remote_sha not in zero_sha_by_length:
+            revisions.extend(["--not", remote_sha])
+        commit_result = _run_git_command(
+            ["rev-list", "--reverse", *revisions],
+            cwd=repo_root,
+        )
+        if commit_result.returncode != 0:
+            raise RuntimeError("Unable to read commits being pushed.")
+        for commit in commit_result.stdout.splitlines():
+            if commit not in seen_commits:
+                seen_commits.add(commit)
+                commits.append(commit)
+
+    return _scan_git_commits(
+        repo_root,
+        commits,
+        ignore_globs=ignore_globs,
+        custom_rules=custom_rules,
+    )
+
+
+def _scan_git_commits(
+    repo_root: str,
+    commits: List[str],
+    ignore_globs: Optional[List[str]] = None,
+    custom_rules: Optional[List[CustomRule]] = None,
+) -> List[Dict[str, Any]]:
+    """Scan changed blobs in a parent-before-child commit sequence."""
     active_ignores = ignore_globs or DEFAULT_IGNORE
-    last_blob_by_path: Dict[str, str] = {}
     seen_findings: set[tuple[str, str, str]] = set()
     issues: List[Dict[str, Any]] = []
 
-    for commit in commits_result.stdout.splitlines():
+    for commit in commits:
+        changed_result = _run_git_command(
+            [
+                "diff-tree",
+                "--root",
+                "--no-commit-id",
+                "--name-only",
+                "-r",
+                "-m",
+                "-z",
+                commit,
+            ],
+            cwd=repo_root,
+            text=False,
+        )
+        if changed_result.returncode != 0:
+            raise RuntimeError("Unable to identify files changed in pushed commits.")
+        changed_paths = {
+            os.fsdecode(raw_path)
+            for raw_path in changed_result.stdout.split(b"\0")
+            if raw_path
+        }
+        if not changed_paths:
+            continue
+
         tree_result = _run_git_command(
-            ["ls-tree", "-r", "-z", "--full-tree", commit],
+            [
+                "--literal-pathspecs",
+                "ls-tree",
+                "-r",
+                "-z",
+                "--full-tree",
+                commit,
+                "--",
+                *sorted(changed_paths),
+            ],
             cwd=repo_root,
             text=False,
         )
@@ -513,14 +624,10 @@ def scan_git_history(
             _mode, object_type, blob_oid = metadata.decode("ascii").split()
             if object_type != "blob":
                 continue
-
             path = os.fsdecode(raw_path)
             absolute_path = os.path.join(repo_root, path)
             if _is_ignored(absolute_path, active_ignores, repo_root):
                 continue
-            if last_blob_by_path.get(path) == blob_oid:
-                continue
-            last_blob_by_path[path] = blob_oid
 
             blob_result = _run_git_command(
                 ["cat-file", "blob", blob_oid],
