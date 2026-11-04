@@ -196,18 +196,96 @@ def _line_has_secret_keyword(line: str) -> bool:
 
 def _suppression_is_active(metadata: str) -> bool:
     """Return whether a suppression directive has not expired."""
+    expiry_status = _suppression_expiry_status(metadata)
+    return expiry_status in {"active", "missing-expiry"}
+
+
+def _suppression_expiry_status(metadata: str) -> str:
+    """Return the expiry state of a suppression directive."""
     expiry_match = SUPPRESSION_EXPIRY_PATTERN.search(metadata)
     if not expiry_match:
-        return True
+        return "missing-expiry"
 
     expiry_text = expiry_match.group(1)
     if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", expiry_text):
-        return False
+        return "invalid-expiry"
     try:
         expiry = date.fromisoformat(expiry_text)
     except ValueError:
+        return "invalid-expiry"
+    return "expired" if date.today() > expiry else "active"
+
+
+def _suppression_has_reason(metadata: str) -> bool:
+    """Return whether a suppression directive includes a non-empty reason."""
+    reason_match = re.search(r"(?i)\breason\s*[:=]\s*(.*)", metadata)
+    if not reason_match:
         return False
-    return date.today() <= expiry
+    reason = reason_match.group(1).split(";", 1)[0].strip(" \t,*/")
+    return bool(reason)
+
+
+def _scan_line(
+    line: str,
+    lineno: int,
+    source: str,
+    custom_rules: Optional[List[CustomRule]] = None,
+) -> List[Dict[str, Any]]:
+    """Return unsuppressed detector matches found on one source line."""
+    issues: List[Dict[str, Any]] = []
+    for name, pattern in SECRET_PATTERNS.items():
+        for match in pattern.finditer(line):
+            value = match.group(1) if match.groups() else match.group(0)
+            severity = get_risk_score(name)
+            issues.append(
+                {
+                    "source": source,
+                    "line": lineno,
+                    "matcher": name,
+                    "value": value,
+                    "snippet": line.strip(),
+                    "confidence": "high",
+                    "reason": "pattern",
+                    "severity": severity.name,
+                }
+            )
+    for rule in custom_rules or []:
+        for match in rule.pattern.finditer(line):
+            issues.append(
+                {
+                    "source": source,
+                    "line": lineno,
+                    "matcher": rule.name,
+                    "value": match.group(0),
+                    "snippet": line.strip(),
+                    "confidence": "high",
+                    "reason": "custom-pattern",
+                    "severity": rule.severity.name,
+                }
+            )
+    for match in SECRET_STRING_PATTERN.finditer(line):
+        value = match.group(1)
+        if len(value) < MIN_ENTROPY_LENGTH:
+            continue
+        if not _line_has_secret_keyword(line):
+            continue
+        entropy = shannon_entropy(value)
+        if entropy >= ENTROPY_THRESHOLD:
+            severity = get_risk_score("High entropy string")
+            issues.append(
+                {
+                    "source": source,
+                    "line": lineno,
+                    "matcher": "High entropy string",
+                    "value": value,
+                    "snippet": line.strip(),
+                    "confidence": "medium",
+                    "reason": "entropy",
+                    "entropy": round(entropy, 2),
+                    "severity": severity.name,
+                }
+            )
+    return issues
 
 
 def scan_text(
@@ -244,59 +322,125 @@ def scan_text(
                 continue
             continue
 
-        for name, pattern in SECRET_PATTERNS.items():
-            for match in pattern.finditer(line):
-                value = match.group(1) if match.groups() else match.group(0)
-                severity = get_risk_score(name)
-                issues.append(
-                    {
-                        "source": source,
-                        "line": lineno,
-                        "matcher": name,
-                        "value": value,
-                        "snippet": line.strip(),
-                        "confidence": "high",
-                        "reason": "pattern",
-                        "severity": severity.name,
-                    }
-                )
-        for rule in custom_rules or []:
-            for match in rule.pattern.finditer(line):
-                issues.append(
-                    {
-                        "source": source,
-                        "line": lineno,
-                        "matcher": rule.name,
-                        "value": match.group(0),
-                        "snippet": line.strip(),
-                        "confidence": "high",
-                        "reason": "custom-pattern",
-                        "severity": rule.severity.name,
-                    }
-                )
-        for match in SECRET_STRING_PATTERN.finditer(line):
-            value = match.group(1)
-            if len(value) < MIN_ENTROPY_LENGTH:
-                continue
-            if not _line_has_secret_keyword(line):
-                continue
-            entropy = shannon_entropy(value)
-            if entropy >= ENTROPY_THRESHOLD:
-                severity = get_risk_score("High entropy string")
-                issues.append(
-                    {
-                        "source": source,
-                        "line": lineno,
-                        "matcher": "High entropy string",
-                        "value": value,
-                        "snippet": line.strip(),
-                        "confidence": "medium",
-                        "reason": "entropy",
-                        "entropy": round(entropy, 2),
-                        "severity": severity.name,
-                    }
-                )
+        issues.extend(_scan_line(line, lineno, source, custom_rules))
     return issues
+
+
+def audit_suppressions_text(
+    content: str,
+    source: str,
+    custom_rules: Optional[List[CustomRule]] = None,
+) -> List[Dict[str, Any]]:
+    """Audit suppression directives without returning source or finding values.
+
+    Args:
+        content: Source text to inspect.
+        source: Source identifier, preferably relative to the repository.
+        custom_rules: Optional configured detection rules.
+
+    Returns:
+        Suppression records containing only location, target line, and statuses.
+    """
+    suppressions: List[Dict[str, Any]] = []
+    lines = content.splitlines()
+    for lineno, line in enumerate(lines, start=1):
+        directive = SUPPRESSION_DIRECTIVE_PATTERN.search(line)
+        if not directive:
+            continue
+
+        metadata = directive.group("metadata")
+        action = directive.group("action").lower()
+        target_line = lineno if action == "ignore" else lineno + 1
+        target_exists = target_line <= len(lines)
+        statuses: List[str] = []
+        if not _suppression_has_reason(metadata):
+            statuses.append("missing-reason")
+
+        expiry_status = _suppression_expiry_status(metadata)
+        if expiry_status != "active":
+            statuses.append(expiry_status)
+
+        is_active = expiry_status in {"active", "missing-expiry"}
+        has_finding = (
+            target_exists
+            and bool(
+                _scan_line(
+                    lines[target_line - 1],
+                    target_line,
+                    source,
+                    custom_rules,
+                )
+            )
+        )
+        if is_active and not has_finding:
+            statuses.append("unused")
+        if not statuses:
+            statuses.append("active")
+
+        suppressions.append(
+            {
+                "source": source,
+                "line": lineno,
+                "target_line": target_line if target_exists else None,
+                "statuses": statuses,
+            }
+        )
+    return suppressions
+
+
+def audit_suppressions_in_repo(
+    repo_root: str,
+    ignore_globs: Optional[List[str]] = None,
+    custom_rules: Optional[List[CustomRule]] = None,
+) -> List[Dict[str, Any]]:
+    """Audit inline suppressions in readable text files under a repository root.
+
+    Args:
+        repo_root: Repository directory to inspect.
+        ignore_globs: Optional path patterns to exclude.
+        custom_rules: Optional configured detection rules.
+
+    Returns:
+        Suppression audit records containing no source text or secret values.
+
+    Raises:
+        OSError: If a repository file cannot be read.
+        ValueError: If repo_root is not a directory.
+    """
+    root_path = Path(repo_root)
+    if not root_path.is_dir():
+        raise ValueError("A repository directory is required.")
+
+    active_ignores = DEFAULT_IGNORE if ignore_globs is None else ignore_globs
+    suppressions: List[Dict[str, Any]] = []
+    for current_root, dirs, file_names in os.walk(root_path, followlinks=False):
+        dirs[:] = [
+            directory
+            for directory in dirs
+            if directory != ".git"
+            and not _is_ignored(
+                os.path.join(current_root, directory),
+                active_ignores,
+                repo_root,
+            )
+        ]
+        for file_name in file_names:
+            full_path = os.path.join(current_root, file_name)
+            if os.path.islink(full_path) or _is_ignored(
+                full_path, active_ignores, repo_root
+            ):
+                continue
+            with open(full_path, "rb") as handle:
+                data = handle.read()
+            if not is_text_bytes(data[:2048]):
+                continue
+
+            source = _sanitize_source_path(full_path, repo_root)
+            content = data.decode("utf-8", errors="replace")
+            suppressions.extend(
+                audit_suppressions_text(content, source, custom_rules)
+            )
+    return suppressions
 
 
 def scan_staged_files(

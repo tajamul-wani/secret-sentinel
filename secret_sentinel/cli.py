@@ -16,6 +16,7 @@ from .formatters import format_json, format_sarif, format_text
 from .history import ScanHistory
 from .risk_scoring import SeverityLevel, calculate_overall_severity
 from .scanner import (
+    audit_suppressions_in_repo,
     get_git_root,
     get_staged_content,
     get_staged_paths,
@@ -147,6 +148,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--doctor",
         action="store_true",
         help="Check repository, configuration, hook, and optional baseline setup.",
+    )
+    parser.add_argument(
+        "--audit-suppressions",
+        action="store_true",
+        help="Review inline suppression reasons, expiries, and usage.",
     )
     parser.add_argument(
         "--setup",
@@ -402,6 +408,60 @@ def run_doctor(repo_root: Optional[str]) -> int:
     return 1 if baseline_error else 0
 
 
+def run_suppression_audit(repo_root: Optional[str]) -> int:
+    """Report undocumented, expired, or unused inline suppressions."""
+    if repo_root is None:
+        logger.error(
+            "Run `secret-sentinel --audit-suppressions` inside a Git repository."
+        )
+        return 1
+
+    try:
+        config = SecretSentinelConfig.load(repo_root)
+        suppressions = audit_suppressions_in_repo(
+            repo_root,
+            ignore_globs=config.ignore_globs,
+            custom_rules=config.custom_rules,
+        )
+    except (OSError, configparser.Error, ValueError):
+        logger.error("Suppression audit failed; repository files could not be checked.")
+        return 1
+
+    if not suppressions:
+        print("No inline suppression directives found.")
+        return 0
+
+    print("Suppression audit")
+    problem_count = 0
+    for suppression in suppressions:
+        statuses = suppression["statuses"]
+        if statuses != ["active"]:
+            problem_count += 1
+        status_text = ", ".join(
+            status.replace("-", " ").upper() for status in statuses
+        )
+        target_line = suppression["target_line"]
+        target = (
+            f" -> line {target_line}"
+            if target_line is not None and target_line != suppression["line"]
+            else ""
+        )
+        print(
+            f"{suppression['source']}:{suppression['line']}{target} "
+            f"[{status_text}]"
+        )
+
+    if problem_count:
+        print(
+            f"{problem_count} suppression(s) need review; "
+            "remove obsolete directives or add a reason and future expiry."
+        )
+        return 1
+
+    print(f"All {len(suppressions)} suppression(s) are documented and in use.")
+    return 0
+
+
 def run_setup(repo_root: Optional[str]) -> int:
     """Guide users through common setup choices without making implicit changes."""
     if repo_root is None:
@@ -617,6 +677,36 @@ def main(argv: Optional[List[str]] = None) -> int:
     if args.yes and not args.init:
         logger.error("--yes can only be used with --init.")
         return 2
+
+    if args.audit_suppressions:
+        if (
+            args.paths
+            or args.setup
+            or args.doctor
+            or args.init
+            or args.yes
+            or args.staged
+            or args.git_history
+            or args.diff is not None
+            or args.all_refs
+            or args.baseline
+            or args.update_baseline
+            or args.history
+            or args.stats
+            or args.clear_history
+            or args.install_hook
+            or args.uninstall_hook
+            or args.no_ai
+            or args.fail_on is not None
+            or args.history_limit != 10
+            or args.output
+            or args.format != "text"
+        ):
+            logger.error(
+                "--audit-suppressions cannot be combined with scan or management options."
+            )
+            return 2
+        return run_suppression_audit(git_root)
 
     if args.setup:
         if (
