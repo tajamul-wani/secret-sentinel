@@ -564,11 +564,105 @@ def scan_git_push_updates(
     )
 
 
+def scan_git_commit_range(
+    repo_root: str,
+    base: str,
+    head: str,
+    ignore_globs: Optional[List[str]] = None,
+    custom_rules: Optional[List[CustomRule]] = None,
+) -> List[Dict[str, Any]]:
+    """Scan commits after base through head, including findings later removed.
+
+    Findings already present in the base snapshot are excluded for files
+    touched by the range.
+    """
+    if not base or base.startswith("-") or not head or head.startswith("-"):
+        raise ValueError("Valid base and head commits or refs are required.")
+
+    resolved: List[str] = []
+    for revision in (base, head):
+        result = _run_git_command(
+            [
+                "rev-parse",
+                "--verify",
+                "--quiet",
+                "--end-of-options",
+                f"{revision}^{{commit}}",
+            ],
+            cwd=repo_root,
+        )
+        if result.returncode != 0:
+            raise ValueError("Unable to resolve commit range.")
+        resolved.append(result.stdout.strip())
+    base_commit, head_commit = resolved
+
+    ancestor_result = _run_git_command(
+        ["merge-base", "--is-ancestor", base_commit, head_commit],
+        cwd=repo_root,
+    )
+    if ancestor_result.returncode != 0:
+        raise ValueError("The base commit must be an ancestor of the head commit.")
+
+    commits_result = _run_git_command(
+        ["rev-list", "--reverse", f"{base_commit}..{head_commit}"],
+        cwd=repo_root,
+    )
+    if commits_result.returncode != 0:
+        raise RuntimeError("Unable to read commits in the requested range.")
+    commits = commits_result.stdout.splitlines()
+    if not commits:
+        return []
+
+    changed_paths: set[str] = set()
+    for commit in commits:
+        changed_result = _run_git_command(
+            [
+                "diff-tree",
+                "--root",
+                "--no-commit-id",
+                "--name-only",
+                "-r",
+                "-m",
+                "-z",
+                commit,
+            ],
+            cwd=repo_root,
+            text=False,
+        )
+        if changed_result.returncode != 0:
+            raise RuntimeError("Unable to identify files changed in commit range.")
+        changed_paths.update(
+            os.fsdecode(raw_path)
+            for raw_path in changed_result.stdout.split(b"\0")
+            if raw_path
+        )
+
+    base_issues = _scan_git_tree_paths(
+        repo_root,
+        base_commit,
+        changed_paths,
+        ignore_globs=ignore_globs,
+        custom_rules=custom_rules,
+    )
+    preexisting = {
+        (issue["source"], issue["matcher"], issue["value"])
+        for issue in base_issues
+    }
+    return _scan_git_commits(
+        repo_root,
+        commits,
+        ignore_globs=ignore_globs,
+        custom_rules=custom_rules,
+        excluded_findings=preexisting,
+    )
+
+
 def _scan_git_commits(
     repo_root: str,
     commits: List[str],
     ignore_globs: Optional[List[str]] = None,
     custom_rules: Optional[List[CustomRule]] = None,
+    excluded_findings: Optional[set[tuple[str, str, str]]] = None,
 ) -> List[Dict[str, Any]]:
     """Scan changed blobs in a parent-before-child commit sequence."""
     active_ignores = ignore_globs or DEFAULT_IGNORE
@@ -597,58 +691,80 @@ def _scan_git_commits(
             for raw_path in changed_result.stdout.split(b"\0")
             if raw_path
         }
-        if not changed_paths:
+        for issue in _scan_git_tree_paths(
+            repo_root,
+            commit,
+            changed_paths,
+            ignore_globs=active_ignores,
+            custom_rules=custom_rules,
+        ):
+            finding_key = (issue["source"], issue["matcher"], issue["value"])
+            if finding_key in seen_findings or (
+                excluded_findings is not None and finding_key in excluded_findings
+            ):
+                continue
+            seen_findings.add(finding_key)
+            issue["commit"] = commit
+            issues.append(issue)
+
+    return issues
+
+
+def _scan_git_tree_paths(
+    repo_root: str,
+    commit: str,
+    paths: set[str],
+    ignore_globs: Optional[List[str]] = None,
+    custom_rules: Optional[List[CustomRule]] = None,
+) -> List[Dict[str, Any]]:
+    """Scan selected text blobs in a Git commit snapshot."""
+    if not paths:
+        return []
+
+    tree_result = _run_git_command(
+        [
+            "--literal-pathspecs",
+            "ls-tree",
+            "-r",
+            "-z",
+            "--full-tree",
+            commit,
+            "--",
+            *sorted(paths),
+        ],
+        cwd=repo_root,
+        text=False,
+    )
+    if tree_result.returncode != 0:
+        raise RuntimeError("Unable to read repository history for scanning.")
+
+    active_ignores = ignore_globs or DEFAULT_IGNORE
+    issues: List[Dict[str, Any]] = []
+    for entry in tree_result.stdout.split(b"\0"):
+        if not entry:
+            continue
+        metadata, raw_path = entry.split(b"\t", 1)
+        _mode, object_type, blob_oid = metadata.decode("ascii").split()
+        if object_type != "blob":
+            continue
+        path = os.fsdecode(raw_path)
+        absolute_path = os.path.join(repo_root, path)
+        if _is_ignored(absolute_path, active_ignores, repo_root):
             continue
 
-        tree_result = _run_git_command(
-            [
-                "--literal-pathspecs",
-                "ls-tree",
-                "-r",
-                "-z",
-                "--full-tree",
-                commit,
-                "--",
-                *sorted(changed_paths),
-            ],
+        blob_result = _run_git_command(
+            ["cat-file", "blob", blob_oid],
             cwd=repo_root,
             text=False,
         )
-        if tree_result.returncode != 0:
+        if blob_result.returncode != 0:
             raise RuntimeError("Unable to read repository history for scanning.")
+        if not is_text_bytes(blob_result.stdout):
+            continue
 
-        for entry in tree_result.stdout.split(b"\0"):
-            if not entry:
-                continue
-            metadata, raw_path = entry.split(b"\t", 1)
-            _mode, object_type, blob_oid = metadata.decode("ascii").split()
-            if object_type != "blob":
-                continue
-            path = os.fsdecode(raw_path)
-            absolute_path = os.path.join(repo_root, path)
-            if _is_ignored(absolute_path, active_ignores, repo_root):
-                continue
-
-            blob_result = _run_git_command(
-                ["cat-file", "blob", blob_oid],
-                cwd=repo_root,
-                text=False,
-            )
-            if blob_result.returncode != 0:
-                raise RuntimeError("Unable to read repository history for scanning.")
-            if not is_text_bytes(blob_result.stdout):
-                continue
-
-            source = _sanitize_source_path(absolute_path, repo_root)
-            content = blob_result.stdout.decode("utf-8", errors="replace")
-            for issue in scan_text(content, source, custom_rules=custom_rules):
-                finding_key = (source, issue["matcher"], issue["value"])
-                if finding_key in seen_findings:
-                    continue
-                seen_findings.add(finding_key)
-                issue["commit"] = commit
-                issues.append(issue)
-
+        source = _sanitize_source_path(absolute_path, repo_root)
+        content = blob_result.stdout.decode("utf-8", errors="replace")
+        issues.extend(scan_text(content, source, custom_rules=custom_rules))
     return issues
 
 
