@@ -39,7 +39,7 @@ class ScanHistory:
 
         Args:
             issues: List of detected issues.
-            scan_type: Type of scan ('staged', 'manual', 'hook').
+            scan_type: Type of scan ('staged', 'manual', 'hook', 'pre-push').
             status: Status of the scan ('completed', 'blocked', 'error').
         """
         self.ensure_directory()

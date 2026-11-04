@@ -288,6 +288,14 @@ class TestCLI(unittest.TestCase):
                 .stdout.split()[0],
                 previous_remote_commit,
             )
+            history = ScanHistory(local_repo).get_history(limit=2)
+            self.assertEqual(
+                [record["scan_type"] for record in history],
+                ["pre-push", "pre-push"],
+            )
+            self.assertEqual(
+                [record["status"] for record in history], ["blocked", "completed"]
+            )
 
     def test_main_clean_scan(self) -> None:
         """Main should return 0 when no issues are found."""
@@ -526,10 +534,33 @@ class TestCLI(unittest.TestCase):
                 redirect_stdout(output),
             ):
                 self.assertEqual(main(["--pre-push"]), 1)
+            record = ScanHistory(repo_root).get_history(limit=1)[0]
 
         self.assertIn("Detected potential secrets (1)", output.getvalue())
         self.assertIn("[REDACTED]", output.getvalue())
         self.assertNotIn(DUMMY_AWS, output.getvalue())
+        self.assertEqual(record["scan_type"], "pre-push")
+        self.assertEqual(record["status"], "blocked")
+
+    def test_main_pre_push_scan_fails_closed_when_history_cannot_be_recorded(
+        self,
+    ) -> None:
+        """A failure to persist the scan result prevents the push."""
+        output = StringIO()
+        with tempfile.TemporaryDirectory() as repo_root:
+            with (
+                patch("secret_sentinel.cli.get_git_root", return_value=repo_root),
+                patch("secret_sentinel.cli.sys.stdin", StringIO("")),
+                patch("secret_sentinel.cli.scan_git_push_updates", return_value=[]),
+                patch(
+                    "secret_sentinel.cli.ScanHistory.record_scan",
+                    side_effect=OSError("storage unavailable"),
+                ),
+                redirect_stdout(output),
+            ):
+                self.assertEqual(main(["--pre-push"]), 1)
+
+        self.assertIn("could not record history", output.getvalue())
 
     def test_main_pre_push_scan_reports_invalid_update_data(self) -> None:
         """An invalid update stream blocks the push without disclosing details."""
