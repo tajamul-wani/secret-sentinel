@@ -1,5 +1,6 @@
 """Tests for Secret Sentinel command-line interface."""
 
+import json
 import os
 import tempfile
 import unittest
@@ -430,6 +431,81 @@ class TestCLI(unittest.TestCase):
             ):
                 self.assertEqual(main(["--audit-suppressions"]), 0)
         self.assertIn("No inline suppression directives found.", output.getvalue())
+
+    def test_main_audit_suppressions_supports_json_and_sarif_output(self) -> None:
+        """Machine-readable audit formats preserve status and safe locations."""
+        with tempfile.TemporaryDirectory() as repo_root:
+            Path(repo_root, "fixture.py").write_text(
+                "# secret-sentinel: ignore\n", encoding="utf-8"
+            )
+            with patch("secret_sentinel.cli.get_git_root", return_value=repo_root):
+                json_output = StringIO()
+                with redirect_stdout(json_output):
+                    self.assertEqual(
+                        main(["--audit-suppressions", "--format", "json"]), 1
+                    )
+                json_report = json.loads(json_output.getvalue())
+                self.assertEqual(json_report["status"], "review")
+                self.assertEqual(json_report["needs_review"], 1)
+
+                sarif_output = StringIO()
+                with redirect_stdout(sarif_output):
+                    self.assertEqual(
+                        main(["--audit-suppressions", "--format", "sarif"]), 1
+                    )
+                sarif_report = json.loads(sarif_output.getvalue())
+                result = sarif_report["runs"][0]["results"][0]
+                self.assertEqual(result["ruleId"], "suppression-review")
+                self.assertEqual(result["level"], "warning")
+
+    def test_main_audit_suppressions_writes_report_to_file(self) -> None:
+        """Audit output should support report files without stdout duplication."""
+        with tempfile.TemporaryDirectory() as repo_root:
+            Path(repo_root, "fixture.py").write_text(
+                "# secret-sentinel: ignore\n", encoding="utf-8"
+            )
+            report_path = os.path.join(repo_root, "report.json")
+            output = StringIO()
+            with (
+                patch("secret_sentinel.cli.get_git_root", return_value=repo_root),
+                redirect_stdout(output),
+            ):
+                self.assertEqual(
+                    main(
+                        [
+                            "--audit-suppressions",
+                            "--format",
+                            "json",
+                            "--output",
+                            report_path,
+                        ]
+                    ),
+                    1,
+                )
+
+            self.assertEqual(output.getvalue(), "")
+            report = json.loads(Path(report_path).read_text(encoding="utf-8"))
+            self.assertEqual(report["needs_review"], 1)
+
+    def test_main_audit_suppressions_reports_output_file_errors(self) -> None:
+        """An unwritable report path should fail explicitly."""
+        with tempfile.TemporaryDirectory() as repo_root:
+            with (
+                patch("secret_sentinel.cli.get_git_root", return_value=repo_root),
+                redirect_stdout(StringIO()),
+            ):
+                self.assertEqual(
+                    main(
+                        [
+                            "--audit-suppressions",
+                            "--format",
+                            "json",
+                            "--output",
+                            os.path.join(repo_root, "missing", "report.json"),
+                        ]
+                    ),
+                    1,
+                )
 
     def test_main_audit_suppressions_rejects_other_modes(self) -> None:
         """Suppression audit cannot silently ignore another command's options."""

@@ -3,7 +3,14 @@
 import json
 import unittest
 
-from secret_sentinel.formatters import format_json, format_sarif, format_text
+from secret_sentinel.formatters import (
+    format_json,
+    format_sarif,
+    format_suppression_audit_json,
+    format_suppression_audit_sarif,
+    format_suppression_audit_text,
+    format_text,
+)
 from secret_sentinel.risk_scoring import SeverityLevel
 
 DUMMY_AWS = "AKIA" + "1234567890ABCDEF"
@@ -227,6 +234,95 @@ class TestFormatters(unittest.TestCase):
     def test_format_sarif_includes_baseline_suppressed_count(self) -> None:
         data = json.loads(format_sarif([], baseline_suppressed=2))
         self.assertEqual(data["runs"][0]["properties"]["baselineSuppressed"], 2)
+
+    def test_format_suppression_audit_text_empty_and_findings(self) -> None:
+        """Audit text should clearly report empty and review-needed results."""
+        self.assertEqual(
+            format_suppression_audit_text([]),
+            "No inline suppression directives found.",
+        )
+        report = format_suppression_audit_text(
+            [
+                {
+                    "source": "src/config.py",
+                    "line": 4,
+                    "target_line": 5,
+                    "statuses": ["missing-reason", "unused"],
+                }
+            ]
+        )
+        self.assertIn("src/config.py:4 -> line 5", report)
+        self.assertIn("[MISSING REASON, UNUSED]", report)
+        self.assertIn("1 suppression(s) need review", report)
+
+    def test_format_suppression_audit_json_is_secret_free(self) -> None:
+        """JSON reports include only audit metadata, never source text or values."""
+        raw_secret = "fixture-secret-value"
+        report = format_suppression_audit_json(
+            [
+                {
+                    "source": "src/config.py",
+                    "line": 4,
+                    "target_line": 4,
+                    "statuses": ["missing-expiry"],
+                    "snippet": raw_secret,
+                    "value": raw_secret,
+                }
+            ]
+        )
+
+        data = json.loads(report)
+        self.assertEqual(data["status"], "review")
+        self.assertEqual(data["total_suppressions"], 1)
+        self.assertEqual(data["needs_review"], 1)
+        self.assertEqual(data["suppressions"][0]["statuses"], ["missing-expiry"])
+        self.assertNotIn(raw_secret, report)
+        self.assertNotIn("snippet", data["suppressions"][0])
+
+    def test_format_suppression_audit_sarif_includes_locations_and_status(self) -> None:
+        """SARIF audit output should map statuses to safe source-line diagnostics."""
+        raw_secret = "fixture-secret-value"
+        report = format_suppression_audit_sarif(
+            [
+                {
+                    "source": "src/config.py",
+                    "line": 4,
+                    "target_line": 5,
+                    "statuses": ["missing-reason", "unused"],
+                    "snippet": raw_secret,
+                    "value": raw_secret,
+                },
+                {
+                    "source": "src/other.py",
+                    "line": 8,
+                    "target_line": 8,
+                    "statuses": ["active"],
+                },
+            ]
+        )
+
+        data = json.loads(report)
+        run = data["runs"][0]
+        self.assertEqual(data["version"], "2.1.0")
+        self.assertEqual(len(run["results"]), 2)
+        self.assertEqual(run["results"][0]["ruleId"], "suppression-review")
+        self.assertEqual(run["results"][0]["level"], "warning")
+        self.assertEqual(
+            run["results"][0]["locations"][0]["physicalLocation"]["region"][
+                "startLine"
+            ],
+            4,
+        )
+        self.assertEqual(run["results"][0]["properties"]["targetLine"], 5)
+        self.assertEqual(run["results"][1]["ruleId"], "suppression-active")
+        self.assertEqual(run["results"][1]["level"], "note")
+        self.assertNotIn(raw_secret, report)
+
+    def test_format_suppression_audit_sarif_empty(self) -> None:
+        """SARIF audit output for a clean repository has no results."""
+        data = json.loads(format_suppression_audit_sarif([]))
+        self.assertEqual(data["version"], "2.1.0")
+        self.assertEqual(data["runs"][0]["results"], [])
 
     def test_unknown_matcher_gets_generic_remediation(self) -> None:
         issue = dict(self.sample_issues[0], matcher="Organization Custom Token")

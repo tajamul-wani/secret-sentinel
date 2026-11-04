@@ -414,6 +414,8 @@ def audit_suppressions_in_repo(
     active_ignores = DEFAULT_IGNORE if ignore_globs is None else ignore_globs
     suppressions: List[Dict[str, Any]] = []
     for current_root, dirs, file_names in os.walk(root_path, followlinks=False):
+        dirs.sort()
+        file_names.sort()
         dirs[:] = [
             directory
             for directory in dirs
