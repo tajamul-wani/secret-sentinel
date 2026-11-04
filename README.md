@@ -93,7 +93,20 @@ secret-sentinel --diff origin/main --format sarif --output results.sarif
 
 Diff scanning requires a Git repository and an available base commit/ref. It
 checks added lines in tracked files and skips removed lines, which is useful
-for reviewing a branch without re-reporting unchanged findings elsewhere.
+for reviewing working-tree changes without re-reporting unchanged findings
+elsewhere.
+
+To scan every commit between a base and head, including secrets introduced and
+removed in intermediate commits, use:
+
+```bash
+secret-sentinel --commit-range origin/main HEAD
+secret-sentinel --commit-range origin/main HEAD --format sarif --output range-results.sarif
+```
+
+The base must be an ancestor of the head. Findings already present in the base
+snapshot are excluded. The GitHub Actions example below uses this mode for pull
+requests so a secret removed in a later commit is still detected.
 
 Scan commit history reachable from the current `HEAD`:
 
@@ -278,10 +291,10 @@ jobs:
           python-version: "3.12"
       - name: Install Secret Sentinel
         run: python -m pip install "git+https://github.com/tajamul-wani/secret-sentinel.git"
-      - name: Scan changed lines
+      - name: Scan pull request commit range
         env:
           PR_BASE_REF: ${{ github.base_ref }}
-        run: secret-sentinel --diff "origin/$PR_BASE_REF"
+        run: secret-sentinel --commit-range "origin/$PR_BASE_REF" HEAD
 ```
 
 Change `main` in the workflow trigger to the target branch used by your
