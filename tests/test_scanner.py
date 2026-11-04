@@ -20,10 +20,11 @@ from secret_sentinel.scanner import (
     get_git_root,
     get_staged_content,
     get_staged_paths,
-    scan_paths,
+    scan_git_commit_range,
     scan_git_diff,
     scan_git_history,
     scan_git_push_updates,
+    scan_paths,
     scan_staged_files,
     scan_text,
     summarize_issues,
@@ -326,6 +327,58 @@ class TestScanner(unittest.TestCase):
 
         self.assertEqual(len(issues), 1)
         self.assertEqual(issues[0]["commit"], secret_commit)
+
+    def test_scan_git_commit_range_detects_secret_removed_before_head(self) -> None:
+        """Range scanning finds a secret even when a later commit removes it."""
+        with tempfile.TemporaryDirectory() as repo_root:
+            self._initialize_history_repo(repo_root)
+            self._commit_file(repo_root, "README.txt", b"base\n")
+            base_commit = self._run_git(repo_root, "rev-parse", "HEAD")
+            secret_commit = self._commit_file(
+                repo_root, "settings.py", f'api_key = "{DUMMY_AWS}"\n'.encode()
+            )
+            head_commit = self._commit_file(
+                repo_root, "settings.py", b"api_key = 'removed'\n"
+            )
+
+            issues = scan_git_commit_range(repo_root, base_commit, head_commit)
+
+        self.assertEqual({issue["source"] for issue in issues}, {"settings.py"})
+        self.assertEqual({issue["commit"] for issue in issues}, {secret_commit})
+        self.assertIn(
+            "AWS Secret Access Key", {issue["matcher"] for issue in issues}
+        )
+
+    def test_scan_git_commit_range_ignores_findings_already_in_base(self) -> None:
+        """Existing findings are not re-reported when a file changes in range."""
+        with tempfile.TemporaryDirectory() as repo_root:
+            self._initialize_history_repo(repo_root)
+            base_commit = self._commit_file(
+                repo_root,
+                "settings.py",
+                f'api_key = "{DUMMY_AWS}"\nvalue = 1\n'.encode(),
+            )
+            head_commit = self._commit_file(
+                repo_root,
+                "settings.py",
+                f'api_key = "{DUMMY_AWS}"\nvalue = 2\n'.encode(),
+            )
+
+            issues = scan_git_commit_range(repo_root, base_commit, head_commit)
+
+        self.assertEqual(issues, [])
+
+    def test_scan_git_commit_range_rejects_non_ancestor_base(self) -> None:
+        """The base must be an ancestor so the requested range is unambiguous."""
+        with tempfile.TemporaryDirectory() as repo_root:
+            self._initialize_history_repo(repo_root)
+            self._commit_file(repo_root, "README.txt", b"main\n")
+            main_commit = self._run_git(repo_root, "rev-parse", "HEAD")
+            self._run_git(repo_root, "checkout", "-q", "-b", "other")
+            head_commit = self._commit_file(repo_root, "README.txt", b"other\n")
+
+            with self.assertRaisesRegex(ValueError, "base commit must be an ancestor"):
+                scan_git_commit_range(repo_root, head_commit, main_commit)
 
     def test_scan_git_diff_reports_only_added_secret_lines(self) -> None:
         """Existing findings are omitted when their lines are unchanged."""
