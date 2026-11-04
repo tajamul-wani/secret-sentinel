@@ -106,6 +106,11 @@ class TestCLI(unittest.TestCase):
         self.assertTrue(args.stats)
         self.assertTrue(args.clear_history)
 
+    def test_parse_args_for_commit_range_scan(self) -> None:
+        """Parse explicit base and head revisions for range scans."""
+        args = parse_args(["--commit-range", "origin/main", "HEAD"])
+        self.assertEqual(args.commit_range, ["origin/main", "HEAD"])
+
     def test_parse_args_from_alias(self) -> None:
         """Ensure parse_args_from alias behaves identically."""
         args = parse_args_from(["--debug", "--staged"])
@@ -468,6 +473,69 @@ class TestCLI(unittest.TestCase):
                 with patch("secret_sentinel.cli.scan_paths", return_value=[]) as scan:
                     self.assertEqual(main(["--diff", "HEAD~1", "--no-ai"]), 0)
             self.assertEqual(scan.call_args.kwargs["diff_base"], "HEAD~1")
+
+    def test_main_commit_range_forwards_revisions_and_records_history(self) -> None:
+        """Commit-range scans forward both revisions and record scan type."""
+        issue = {
+            "source": "settings.py",
+            "line": 1,
+            "matcher": "AWS Secret Access Key",
+            "value": DUMMY_AWS,
+            "snippet": f'key = "{DUMMY_AWS}"',
+            "confidence": "high",
+            "severity": "CRITICAL",
+            "commit": "0123456789abcdef",
+        }
+        with tempfile.TemporaryDirectory() as repo_root:
+            history = ScanHistory(repo_root)
+            with patch("secret_sentinel.cli.get_git_root", return_value=repo_root):
+                with patch(
+                    "secret_sentinel.cli.scan_git_commit_range",
+                    return_value=[issue],
+                ) as scan:
+                    self.assertEqual(
+                        main(["--commit-range", "origin/main", "HEAD", "--no-ai"]),
+                        1,
+                    )
+
+            scan.assert_called_once()
+            self.assertEqual(scan.call_args.args[1:3], ("origin/main", "HEAD"))
+            self.assertEqual(history.get_history()[0]["scan_type"], "git-range")
+
+    def test_main_commit_range_rejects_other_scan_modes(self) -> None:
+        """Commit ranges must not be silently combined with other scan modes."""
+        with patch("secret_sentinel.cli.get_git_root", return_value=None):
+            self.assertEqual(
+                main(["--commit-range", "origin/main", "HEAD", "--diff", "HEAD~1"]),
+                2,
+            )
+            self.assertEqual(
+                main(["--commit-range", "origin/main", "HEAD", "src/"]),
+                2,
+            )
+            self.assertEqual(
+                main(["--commit-range", "origin/main", "HEAD", "--history"]),
+                2,
+            )
+
+    def test_main_commit_range_reports_errors_without_details(self) -> None:
+        """Range scan errors use a generic message that avoids revision data."""
+        with tempfile.TemporaryDirectory() as repo_root:
+            output = StringIO()
+            with (
+                patch("secret_sentinel.cli.get_git_root", return_value=repo_root),
+                patch(
+                    "secret_sentinel.cli.scan_git_commit_range",
+                    side_effect=RuntimeError("internal detail"),
+                ),
+                redirect_stdout(output),
+            ):
+                self.assertEqual(
+                    main(["--commit-range", "private-revision", "HEAD"]), 1
+                )
+
+        self.assertIn("Commit range scan failed", output.getvalue())
+        self.assertNotIn("internal detail", output.getvalue())
 
     def test_main_git_history_scan_reports_errors(self) -> None:
         """History scan errors should fail explicitly with a generic message."""

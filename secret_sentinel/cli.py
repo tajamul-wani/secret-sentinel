@@ -27,10 +27,11 @@ from .scanner import (
     get_git_root,
     get_staged_content,
     get_staged_paths,
-    scan_paths as scan_disk_paths,
+    scan_git_commit_range,
     scan_git_diff,
     scan_git_history,
     scan_git_push_updates,
+    scan_paths as scan_disk_paths,
     scan_staged_files,
     summarize_issues,
 )
@@ -95,6 +96,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--diff",
         metavar="BASE",
         help="Scan added lines in the working tree diff against BASE.",
+    )
+    parser.add_argument(
+        "--commit-range",
+        nargs=2,
+        metavar=("BASE", "HEAD"),
+        help="Scan commits from BASE through HEAD, including intermediate history.",
     )
     parser.add_argument(
         "--all-refs",
@@ -843,6 +850,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             or args.staged
             or args.git_history
             or args.diff is not None
+            or args.commit_range is not None
             or args.all_refs
             or args.baseline
             or args.update_baseline
@@ -878,6 +886,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             or args.staged
             or args.git_history
             or args.diff is not None
+            or args.commit_range is not None
             or args.all_refs
             or args.baseline
             or args.update_baseline
@@ -909,6 +918,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             or args.staged
             or args.git_history
             or args.diff is not None
+            or args.commit_range is not None
             or args.all_refs
             or args.baseline
             or args.update_baseline
@@ -938,6 +948,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             or args.staged
             or args.git_history
             or args.diff is not None
+            or args.commit_range is not None
             or args.all_refs
             or args.baseline
             or args.update_baseline
@@ -965,6 +976,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             or args.staged
             or args.git_history
             or args.diff is not None
+            or args.commit_range is not None
             or args.all_refs
             or args.baseline
             or args.update_baseline
@@ -996,6 +1008,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 2
 
     if args.history or args.stats or args.clear_history:
+        if args.commit_range:
+            logger.error("--commit-range cannot be combined with history options.")
+            return 2
         history_manager = ScanHistory(repo_root)
 
         if args.clear_history:
@@ -1068,6 +1083,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             or args.staged
             or args.git_history
             or args.diff is not None
+            or args.commit_range is not None
             or args.all_refs
             or args.baseline
             or args.update_baseline
@@ -1099,13 +1115,24 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 2
     threshold = SeverityLevel[args.fail_on.upper()] if args.fail_on else config.fail_on
 
-    if args.git_history and (args.paths or args.staged):
-        logger.error("--git-history cannot be combined with paths or --staged.")
+    if args.git_history and (
+        args.paths or args.staged or args.diff is not None or args.commit_range
+    ):
+        logger.error("--git-history cannot be combined with other scan modes.")
         return 2
     if args.diff is not None and (
-        args.paths or args.staged or args.git_history or args.all_refs
+        args.paths
+        or args.staged
+        or args.git_history
+        or args.commit_range
+        or args.all_refs
     ):
-        logger.error("--diff cannot be combined with paths, --staged, or --git-history.")
+        logger.error("--diff cannot be combined with other scan modes.")
+        return 2
+    if args.commit_range and (
+        args.paths or args.staged or args.git_history or args.diff is not None
+    ):
+        logger.error("--commit-range cannot be combined with other scan modes.")
         return 2
     if args.all_refs and not args.git_history:
         logger.error("--all-refs requires --git-history.")
@@ -1124,6 +1151,18 @@ def main(argv: Optional[List[str]] = None) -> int:
             )
         except (OSError, RuntimeError):
             logger.error("Git history scan failed.")
+            return 1
+    elif args.commit_range:
+        try:
+            issues = scan_git_commit_range(
+                repo_root,
+                args.commit_range[0],
+                args.commit_range[1],
+                ignore_globs=config.ignore_globs,
+                custom_rules=config.custom_rules,
+            )
+        except (OSError, RuntimeError, ValueError):
+            logger.error("Commit range scan failed.")
             return 1
     elif args.diff is not None:
         try:
@@ -1180,7 +1219,15 @@ def main(argv: Optional[List[str]] = None) -> int:
     scan_type = (
         "git-history"
         if args.git_history
-        else ("diff" if args.diff is not None else ("staged" if args.staged else "manual"))
+        else (
+            "git-range"
+            if args.commit_range
+            else (
+                "diff"
+                if args.diff is not None
+                else ("staged" if args.staged else "manual")
+            )
+        )
     )
     status = "blocked" if should_block else "completed"
     history_manager.record_scan(issues, scan_type=scan_type, status=status)
