@@ -34,9 +34,11 @@ SECRET_PATTERNS = {
     "NPM Access Token": re.compile(r"\bnpm_[A-Za-z0-9]{36}\b"),
     "Generic Secret Assignment": re.compile(
         r"(?i)(?<![A-Za-z0-9])[A-Za-z0-9_-]*?"
-        r"(?:api[_\-]?key|secret|token|password|passwd|auth|credential|"
+        r"(?:api[_\-]?key|app[_\-]?key|secret(?:[_\-]?key(?:[_\-]?base)?)?"
+        r"|master[_\-]?key|token|password|passwd|pass|auth|credential|"
         r"client[_\-]?secret|private[_\-]?key|oauth[_\-]?token)"
-        r"(?![A-Za-z0-9])[\"']?\s*[:=]\s*[\"']?([A-Za-z0-9_\-+\/=]{16,})[\"']?"
+        r"(?![A-Za-z0-9])[\"']?\s*[:=]\s*[\"']?(?:base64:)?"
+        r"([A-Za-z0-9_\-+\/=]{16,})[\"']?"
     ),
 }
 SUPPRESSION_DIRECTIVE_PATTERN = re.compile(

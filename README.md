@@ -195,8 +195,8 @@ on its own. A matching secret access key is required.
 
 The scanner uses known formats and heuristics. It can miss unfamiliar
 credentials and may flag harmless values. A small synthetic regression corpus
-checks common cases; its results are not a measure of real-world accuracy. Run
-it with `python tests/test_detection_quality.py`.
+checks common formats and framework settings; its results are not a measure of
+real-world accuracy. Run it with `python tests/test_detection_quality.py`.
 Generic assignment checks skip obvious template values such as
 `YOUR_API_KEY_HERE` and `replace-with-token-from-vault`.
 
