@@ -3,7 +3,6 @@
 import json
 import tempfile
 import unittest
-from pathlib import Path
 
 from secret_sentinel.baseline import ScanBaseline
 

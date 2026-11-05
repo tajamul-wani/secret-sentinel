@@ -26,14 +26,12 @@ from .scanner import (
     audit_suppressions_in_repo,
     get_git_root,
     get_staged_content,
-    get_staged_paths,
     scan_git_commit_range,
     scan_git_diff,
     scan_git_history,
     scan_git_push_updates,
     scan_paths as scan_disk_paths,
     scan_staged_files,
-    summarize_issues,
 )
 
 logger = logging.getLogger("secret_sentinel")

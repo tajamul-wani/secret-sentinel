@@ -5,7 +5,6 @@ and trace module to verify the >=80% coverage protocol requirement without
 requiring external network access or third-party packages.
 """
 
-import os
 import sys
 import trace
 import unittest
@@ -82,7 +81,7 @@ def run_with_coverage() -> int:
 
         exec_lines = get_code_lines(code)
         # Filter line 0 or invalid markers
-        exec_lines = {l for l in exec_lines if l > 0}
+        exec_lines = {line for line in exec_lines if line > 0}
 
         executed = sum(1 for line in exec_lines if (canonical_path, line) in counts)
 
