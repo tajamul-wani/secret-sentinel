@@ -12,7 +12,6 @@ from secret_sentinel.config import CustomRule
 from secret_sentinel.risk_scoring import SeverityLevel
 from secret_sentinel.scanner import (
     _is_ignored,
-    _line_has_secret_keyword,
     _normalize_path,
     _sanitize_source_path,
     audit_suppressions_in_repo,
@@ -32,8 +31,9 @@ from secret_sentinel.scanner import (
 
 # Test dummy tokens constructed via concatenation to prevent false triggers in remote secret scanners
 DUMMY_AWS = "AKIA" + "1234567890ABCDEF"
+DUMMY_AWS_SECRET = "AbCd1234" * 5
 DUMMY_GOOGLE = "AIza" + "SyD-dummyGoogleKeyPattern_123456789"
-DUMMY_STRIPE = "pk_test_" + "123456789012345678901234"
+DUMMY_STRIPE = "sk_test_" + "123456789012345678901234"
 DUMMY_GITHUB = "ghp_" + "123456789012345678901234567890123456"
 DUMMY_SLACK = "xoxb-" + "1234567890-abcdefghij"
 DUMMY_JWT = "eyJ" + "hbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.doNotLeakThisSignature123"
@@ -96,7 +96,7 @@ class TestScanner(unittest.TestCase):
         self.assertEqual(len(issues), 1)
         self.assertEqual(issues[0]["source"], "config.py")
         self.assertEqual(issues[0]["commit"], first_commit)
-        self.assertEqual(issues[0]["matcher"], "AWS Secret Access Key")
+        self.assertEqual(issues[0]["matcher"], "AWS Access Key ID")
 
     def test_scan_git_history_applies_custom_rules(self) -> None:
         """History scans should use configured detectors and their severity."""
@@ -346,7 +346,7 @@ class TestScanner(unittest.TestCase):
         self.assertEqual({issue["source"] for issue in issues}, {"settings.py"})
         self.assertEqual({issue["commit"] for issue in issues}, {secret_commit})
         self.assertIn(
-            "AWS Secret Access Key", {issue["matcher"] for issue in issues}
+            "AWS Access Key ID", {issue["matcher"] for issue in issues}
         )
 
     def test_scan_git_commit_range_ignores_findings_already_in_base(self) -> None:
@@ -409,7 +409,7 @@ class TestScanner(unittest.TestCase):
         self.assertEqual([issue["line"] for issue in issues], [2, 3])
         self.assertEqual(
             [issue["matcher"] for issue in issues],
-            ["AWS Secret Access Key", "Company API Token"],
+            ["AWS Access Key ID", "Company API Token"],
         )
 
     def test_scan_git_diff_ignores_removed_secret_lines(self) -> None:
@@ -433,10 +433,31 @@ class TestScanner(unittest.TestCase):
                 scan_git_diff("missing-base", repo_root)
 
     def test_scan_text_detects_aws_key(self) -> None:
-        """Detect AWS access keys."""
+        """Identify AWS access key IDs accurately."""
         content = f'aws_key = "{DUMMY_AWS}"\n'
         issues = scan_text(content, "config.py")
-        self.assertTrue(any(i["matcher"] == "AWS Secret Access Key" for i in issues))
+        issue = next(
+            issue for issue in issues if issue["matcher"] == "AWS Access Key ID"
+        )
+        self.assertEqual(issue["severity"], "MEDIUM")
+
+    def test_scan_text_detects_aws_secret_access_key(self) -> None:
+        """Detect AWS secret access keys separately from access key IDs."""
+        content = f'aws_secret_access_key = "{DUMMY_AWS_SECRET}"\n'
+        issues = scan_text(content, "config.py")
+        issue = next(
+            issue for issue in issues if issue["matcher"] == "AWS Secret Access Key"
+        )
+        self.assertEqual(issue["severity"], "CRITICAL")
+
+    def test_scan_text_rejects_malformed_aws_secret_access_key_length(self) -> None:
+        """Do not match AWS secret access key values longer than their fixed format."""
+        value = DUMMY_AWS_SECRET + "x"
+        content = f'aws_secret_access_key = "{value}"\n'
+        issues = scan_text(content, "config.py")
+        self.assertFalse(
+            any(issue["matcher"] == "AWS Secret Access Key" for issue in issues)
+        )
 
     def test_scan_text_detects_configured_custom_rule(self) -> None:
         """Custom patterns report their configured name and severity."""
@@ -686,12 +707,31 @@ class TestScanner(unittest.TestCase):
         content = 'api_key: "abcdef1234567890_super_secret"\n'
         issues = scan_text(content, "settings.yml")
         self.assertTrue(any(i["matcher"] == "Generic Secret Assignment" for i in issues))
+        self.assertEqual(len(issues), 1)
 
     def test_scan_text_detects_high_entropy_string(self) -> None:
-        """Detect high entropy strings paired with secret keywords."""
-        content = 'secret_token = "K9zXwQ7pL2vM5yB8tR4cE1aD3fG6hJ0n"\n'
+        """Detect high-entropy values assigned to secret-related fields."""
+        value = "K9zXwQ7p.L2vM5yB8.tR4cE1aD3.fG6hJ0n"
+        content = f'secret_token = "{value}"\n'
         issues = scan_text(content, "secure.py")
-        self.assertTrue(any(i["matcher"] == "High entropy string" for i in issues))
+        self.assertEqual(
+            [issue["matcher"] for issue in issues], ["High entropy string"]
+        )
+
+    def test_scan_text_ignores_entropy_unrelated_to_secret_assignment(self) -> None:
+        """Ignore unrelated entropy even beside secret-related wording."""
+        content = (
+            'print("secret rotation complete", '
+            '"K9zXwQ7pL2vM5yB8tR4cE1aD3fG6hJ0n")\n'
+        )
+        self.assertEqual(scan_text(content, "logging.py"), [])
+
+    def test_scan_text_does_not_flag_stripe_publishable_key(self) -> None:
+        """Stripe publishable keys are not secret credentials."""
+        publishable_key = "pk_test_" + "123456789012345678901234"
+        content = f'publishable_key = "{publishable_key}"\n'
+        issues = scan_text(content, "frontend.js")
+        self.assertFalse(any(issue["matcher"] == "Stripe API Key" for issue in issues))
 
     def test_scan_text_ignores_clean_code(self) -> None:
         """Clean code without secret patterns or entropy should return no issues."""
@@ -742,12 +782,6 @@ class TestScanner(unittest.TestCase):
         """Path separators should be converted to forward slashes."""
         self.assertEqual(_normalize_path("folder\\sub\\file.py"), "folder/sub/file.py")
 
-    def test_line_has_secret_keyword(self) -> None:
-        """Keyword detection should identify credential keywords."""
-        self.assertTrue(_line_has_secret_keyword("my_secret_token = '...'"))
-        self.assertTrue(_line_has_secret_keyword("API_KEY: '...'"))
-        self.assertFalse(_line_has_secret_keyword("counter = 42"))
-
     def test_scan_paths_disk(self) -> None:
         """Scan directory and files on disk."""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -793,7 +827,9 @@ class TestScanner(unittest.TestCase):
                 return_value=f'api_key = "{DUMMY_AWS}"\n',
             ):
                 issues = scan_staged_files()
-                self.assertTrue(any(i["matcher"] == "AWS Secret Access Key" for i in issues))
+                self.assertTrue(
+                    any(i["matcher"] == "AWS Access Key ID" for i in issues)
+                )
                 self.assertEqual(issues[0]["source"], "app.py")
 
     def test_scan_staged_files_applies_custom_rules(self) -> None:

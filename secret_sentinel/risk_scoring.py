@@ -19,6 +19,8 @@ class SeverityLevel(Enum):
 
 # Risk scores assigned to each secret type
 SECRET_RISK_SCORES: Dict[str, SeverityLevel] = {
+    "AWS Access Key ID": SeverityLevel.MEDIUM,
+    # Keep the former matcher name available for existing baselines and reports.
     "AWS Secret Access Key": SeverityLevel.CRITICAL,
     "Google API Key": SeverityLevel.CRITICAL,
     "Stripe API Key": SeverityLevel.CRITICAL,

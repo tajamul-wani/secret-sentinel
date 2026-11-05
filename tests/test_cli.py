@@ -1249,7 +1249,7 @@ class TestCLI(unittest.TestCase):
                 f.write(f'key = "{DUMMY_AWS}"\n')
 
             issues = cli_scan_paths([clean_file, secret_file], no_ai=True, staged=False, debug=True)
-            self.assertTrue(any(i["matcher"] == "AWS Secret Access Key" for i in issues))
+            self.assertTrue(any(i["matcher"] == "AWS Access Key ID" for i in issues))
 
     def test_cli_scan_uses_custom_rule_severity(self) -> None:
         """Configured custom rules should participate in severity blocking."""

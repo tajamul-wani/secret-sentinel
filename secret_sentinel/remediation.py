@@ -11,6 +11,14 @@ _DEFAULT_GUIDANCE = (
 )
 
 _REMEDIATION: Dict[str, Tuple[str, ...]] = {
+    "AWS Access Key ID": (
+        "An access key ID alone cannot authenticate requests; "
+        "check whether its matching secret access key was also exposed.",
+        "Review CloudTrail and IAM activity for unexpected use of the "
+        "associated identity.",
+        "If the matching secret access key was exposed, deactivate the pair "
+        "and issue a replacement.",
+    ),
     "AWS Secret Access Key": (
         "Deactivate the access key in IAM and issue a replacement for the affected identity.",
         "Review CloudTrail and IAM activity for unexpected use; apply least-privilege permissions.",
