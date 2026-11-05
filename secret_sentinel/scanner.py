@@ -33,7 +33,10 @@ SECRET_PATTERNS = {
     "PyPI API Token": re.compile(r"\bpypi-AgEIcHlwaS5vcmc[A-Za-z0-9_-]{50,}\b"),
     "NPM Access Token": re.compile(r"\bnpm_[A-Za-z0-9]{36}\b"),
     "Generic Secret Assignment": re.compile(
-        r"(?i)\b(?:api[_\-]?key|secret|token|password|passwd|auth|credential|client_secret|private_key|oauth[_\-]?token)\b\s*[:=]\s*[\"']?([A-Za-z0-9_\-+\/=]{16,})[\"']?"
+        r"(?i)(?<![A-Za-z0-9])[A-Za-z0-9_-]*?"
+        r"(?:api[_\-]?key|secret|token|password|passwd|auth|credential|"
+        r"client[_\-]?secret|private[_\-]?key|oauth[_\-]?token)"
+        r"(?![A-Za-z0-9])[\"']?\s*[:=]\s*[\"']?([A-Za-z0-9_\-+\/=]{16,})[\"']?"
     ),
 }
 SUPPRESSION_DIRECTIVE_PATTERN = re.compile(
@@ -49,6 +52,9 @@ SECRET_ASSIGNMENT_PATTERN = re.compile(
 )
 PLACEHOLDER_VALUE_PATTERN = re.compile(
     r"(?i)^(?:"
+    r"\$\{[A-Za-z_][A-Za-z0-9_]*\}|\$[A-Za-z_][A-Za-z0-9_]*"
+    r"|\{\{[^{}]+\}\}|<[A-Za-z_][A-Za-z0-9 _-]*>"
+    r"|"
     r"your(?:[_-](?:api[_-]?key|token|secret|password|credential))?[_-]?here"
     r"|replace[_-](?:with[_-])?.+"
     r"|change[_-](?:this|me)(?:[_-].*)?"
@@ -238,10 +244,10 @@ def _scan_line(
     for name, pattern in SECRET_PATTERNS.items():
         for match in pattern.finditer(line):
             value = match.group(1) if match.groups() else match.group(0)
-            if (
-                name == "Generic Secret Assignment"
-                and PLACEHOLDER_VALUE_PATTERN.fullmatch(value)
-            ):
+            if name in {
+                "Database Connection URI",
+                "Generic Secret Assignment",
+            } and PLACEHOLDER_VALUE_PATTERN.fullmatch(value):
                 continue
             severity = get_risk_score(name)
             issues.append(
@@ -258,12 +264,18 @@ def _scan_line(
             )
     for rule in custom_rules or []:
         for match in rule.pattern.finditer(line):
+            value = match.group(0)
+            issues = [
+                issue
+                for issue in issues
+                if issue["reason"] == "custom-pattern" or issue["value"] != value
+            ]
             issues.append(
                 {
                     "source": source,
                     "line": lineno,
                     "matcher": rule.name,
-                    "value": match.group(0),
+                    "value": value,
                     "snippet": line.strip(),
                     "confidence": "high",
                     "reason": "custom-pattern",
