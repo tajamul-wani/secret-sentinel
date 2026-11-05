@@ -200,6 +200,24 @@ real-world accuracy. Run it with `python tests/test_detection_quality.py`.
 Generic assignment checks skip obvious template values such as
 `YOUR_API_KEY_HERE` and `replace-with-token-from-vault`.
 
+### Benchmarking
+
+The optional benchmark runner measures count-based coverage against a local
+[Leaky Repo](https://github.com/Plazmaz/leaky-repo) checkout. Its MIT-licensed
+examples are described by the project as randomized or redacted. Keep the
+checkout separate from this repository and use a pinned revision:
+
+```bash
+git clone https://github.com/Plazmaz/leaky-repo.git /path/to/leaky-repo
+git -C /path/to/leaky-repo checkout 2e951359cac53addbee56437da3ffb546e3dfe24
+python -m scripts.benchmark_leaky_repo /path/to/leaky-repo \
+  --revision 2e951359cac53addbee56437da3ffb546e3dfe24
+```
+
+The report contains aggregate counts only. The benchmark labels provide counts
+per file, not exact finding locations, so the results do not establish
+precision or recall.
+
 ### Responding to Findings
 
 Text, JSON, and SARIF reports include remediation guidance for detected
