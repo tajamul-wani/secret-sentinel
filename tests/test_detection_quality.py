@@ -18,6 +18,8 @@ class DetectionCase:
     name: str
     content: str
     should_detect: bool
+    expected_matcher: str = ""
+    source: str = ""
 
 
 def build_cases() -> List[DetectionCase]:
@@ -56,16 +58,23 @@ def build_cases() -> List[DetectionCase]:
     )
 
     return [
-        DetectionCase("AWS access key ID", f'aws_key = "{aws_access_key}"', True),
+        DetectionCase(
+            "AWS access key ID",
+            f'aws_key = "{aws_access_key}"',
+            True,
+            "AWS Access Key ID",
+        ),
         DetectionCase(
             "AWS temporary access key ID",
             f'"access_key_id": "{aws_temporary_key}"',
             True,
+            "AWS Access Key ID",
         ),
         DetectionCase(
             "AWS secret access key",
             f'aws_secret_access_key = "{aws_secret_key}"',
             True,
+            "AWS Secret Access Key",
         ),
         DetectionCase(
             "Malformed AWS secret access key",
@@ -76,109 +85,204 @@ def build_cases() -> List[DetectionCase]:
             "Google API key in JSON",
             f'"api_key": "{google_key}"',
             True,
+            "Google API Key",
         ),
         DetectionCase(
             "Google API key in environment file",
             f"GOOGLE_API_KEY={google_key}",
             True,
+            "Google API Key",
         ),
         DetectionCase(
             "Stripe test secret key",
             f"STRIPE_SECRET_KEY={stripe_test_key}",
             True,
+            "Stripe API Key",
         ),
         DetectionCase(
             "Stripe live secret key",
             f'stripe_key = "{stripe_live_key}"',
             True,
+            "Stripe API Key",
         ),
         DetectionCase(
             "Stripe restricted key",
             f"stripe_key: {stripe_restricted_key}",
             True,
+            "Stripe API Key",
         ),
-        DetectionCase("GitHub token", f'token = "{github_token}"', True),
-        DetectionCase("Slack bot token", f"SLACK_BOT_TOKEN={slack_token}", True),
-        DetectionCase("Twilio API key", f'twilio_key = "{twilio_key}"', True),
+        DetectionCase(
+            "GitHub token",
+            f'token = "{github_token}"',
+            True,
+            "GitHub Token",
+        ),
+        DetectionCase(
+            "Slack bot token",
+            f"SLACK_BOT_TOKEN={slack_token}",
+            True,
+            "Slack Token",
+        ),
+        DetectionCase(
+            "Twilio API key",
+            f'twilio_key = "{twilio_key}"',
+            True,
+            "Twilio Secret Key",
+        ),
         DetectionCase(
             "Private key header",
             "-----BEGIN RSA PRIVATE KEY-----",
             True,
+            "Private Key",
         ),
-        DetectionCase("Database connection URI", f'database = "{database_uri}"', True),
-        DetectionCase("Generic token assignment", f'token = "{generic_token}"', True),
-        DetectionCase("Generic password in YAML", f"password: {generic_token}", True),
-        DetectionCase("OpenAI project key", f'openai_key = "{openai_key}"', True),
-        DetectionCase("Anthropic key", f'api_key = "{anthropic_key}"', True),
-        DetectionCase("Hugging Face token", f"HF_TOKEN={huggingface_token}", True),
-        DetectionCase("PyPI upload token", f'pypi_token = "{pypi_token}"', True),
-        DetectionCase("npm access token", f"NPM_TOKEN={npm_token}", True),
+        DetectionCase(
+            "Database connection URI",
+            f'database = "{database_uri}"',
+            True,
+            "Database Connection URI",
+        ),
+        DetectionCase(
+            "Generic token assignment",
+            f'token = "{generic_token}"',
+            True,
+            "Generic Secret Assignment",
+        ),
+        DetectionCase(
+            "Generic password in YAML",
+            f"password: {generic_token}",
+            True,
+            "Generic Secret Assignment",
+        ),
+        DetectionCase(
+            "OpenAI project key",
+            f'openai_key = "{openai_key}"',
+            True,
+            "OpenAI API Key",
+        ),
+        DetectionCase(
+            "Anthropic key",
+            f'api_key = "{anthropic_key}"',
+            True,
+            "Anthropic API Key",
+        ),
+        DetectionCase(
+            "Hugging Face token",
+            f"HF_TOKEN={huggingface_token}",
+            True,
+            "HuggingFace Token",
+        ),
+        DetectionCase(
+            "PyPI upload token",
+            f'pypi_token = "{pypi_token}"',
+            True,
+            "PyPI API Token",
+        ),
+        DetectionCase(
+            "npm access token",
+            f"NPM_TOKEN={npm_token}",
+            True,
+            "NPM Access Token",
+        ),
         DetectionCase(
             "dotenv prefixed API key",
             f"PAYMENTS_API_KEY={generic_token}",
             True,
+            "Generic Secret Assignment",
         ),
         DetectionCase(
             "YAML service token",
             f'service_token: "{service_secret}"',
             True,
+            "Generic Secret Assignment",
         ),
         DetectionCase(
             "JSON client secret",
             f'{{"client_secret": "{service_secret}"}}',
             True,
+            "Generic Secret Assignment",
         ),
         DetectionCase(
             "TOML OAuth token",
             f'oauth_token = "{access_token}"',
             True,
+            "Generic Secret Assignment",
         ),
         DetectionCase(
             "Python camel-case client secret",
             f'clientSecret = "{service_secret}"',
             True,
+            "Generic Secret Assignment",
         ),
         DetectionCase(
             "JavaScript camel-case access token",
             f'const accessToken = "{access_token}";',
             True,
+            "Generic Secret Assignment",
         ),
         DetectionCase(
             "Shell exported token",
             f"export DEPLOYMENT_TOKEN={access_token}",
             True,
+            "Generic Secret Assignment",
         ),
         DetectionCase(
             "Laravel base64 application key",
             f"APP_KEY=base64:{legacy_secret}",
             True,
+            "Generic Secret Assignment",
         ),
         DetectionCase(
             "Rails secret key base",
             f'secret_key_base = "{legacy_secret}"',
             True,
+            "Generic Secret Assignment",
         ),
         DetectionCase(
             "Rails master key",
             f'master_key = "{legacy_secret}"',
             True,
+            "Generic Secret Assignment",
         ),
         DetectionCase(
             "Legacy password field",
             f'pass = "{legacy_secret}"',
             True,
+            "Generic Secret Assignment",
         ),
         DetectionCase(
             "XML password attribute",
             f'<server password="{legacy_secret}" />',
             True,
+            "Generic Secret Assignment",
+        ),
+        DetectionCase(
+            "Netrc password entry",
+            f"machine example.test login deploy password {legacy_secret}",
+            True,
+            "Netrc Password",
+            ".netrc",
+        ),
+        DetectionCase(
+            "PostgreSQL password file entry",
+            f"db.example.test:5432:service:deploy:{legacy_secret}",
+            True,
+            "PostgreSQL Password File",
+            ".pgpass",
+        ),
+        DetectionCase(
+            "Docker registry auth",
+            '{"auths":{"registry.example.test":{"auth":"dXNlcjpwYXNz"}}}',
+            True,
+            "Docker Registry Auth",
+            ".docker/config.json",
         ),
         DetectionCase(
             "High-entropy secret field",
             f'secret = "{high_entropy_value}"',
             True,
+            "High entropy string",
         ),
-        DetectionCase("JWT", f'jwt = "{jwt}"', True),
+        DetectionCase("JWT", f'jwt = "{jwt}"', True, "JWT"),
         DetectionCase(
             "Unrelated entropy beside secret terminology",
             f'print("secret rotation complete", "{unrelated_entropy}")',
@@ -310,6 +414,24 @@ def build_cases() -> List[DetectionCase]:
             'APP_KEY="${APP_KEY}"',
             False,
         ),
+        DetectionCase(
+            "Netrc environment reference",
+            "machine example.test login deploy password ${DEPLOY_PASSWORD}",
+            False,
+            source=".netrc",
+        ),
+        DetectionCase(
+            "PostgreSQL wildcard password",
+            "db.example.test:5432:service:deploy:*",
+            False,
+            source=".pgpass",
+        ),
+        DetectionCase(
+            "Malformed Docker auth value",
+            '{"auths":{"registry.example.test":{"auth":"not-base64!"}}}',
+            False,
+            source=".docker/config.json",
+        ),
     ]
 
 
@@ -317,7 +439,7 @@ def evaluate_cases(cases: List[DetectionCase]) -> Tuple[int, int, int, int]:
     """Return true-positive, false-positive, true-negative, and false-negative."""
     true_positive = false_positive = true_negative = false_negative = 0
     for case in cases:
-        detected = bool(scan_text(case.content, case.name))
+        detected = bool(scan_text(case.content, case.source or case.name))
         if detected and case.should_detect:
             true_positive += 1
         elif detected:
@@ -349,16 +471,68 @@ class TestDetectionQuality(unittest.TestCase):
             f"TP={true_positive}, FP={false_positive}, TN={true_negative}, "
             f"FN={false_negative}, precision={precision:.0%}, recall={recall:.0%}"
         )
+        unlabeled_cases = [
+            case.name
+            for case in cases
+            if case.should_detect and not case.expected_matcher
+        ]
+        missing_matchers = [
+            case.name
+            for case in cases
+            if case.expected_matcher
+            and case.expected_matcher
+            not in {
+                issue["matcher"]
+                for issue in scan_text(case.content, case.source or case.name)
+            }
+        ]
+        detector_cases = {
+            matcher: [
+                case
+                for case in cases
+                if case.expected_matcher == matcher
+            ]
+            for matcher in sorted(
+                {case.expected_matcher for case in cases if case.expected_matcher}
+            )
+        }
+        detector_metrics = ", ".join(
+            f"{matcher}="
+            f"{len(group) - sum(case.name in missing_matchers for case in group)}"
+            f"/{len(group)}"
+            for matcher, group in detector_cases.items()
+        )
+        print(f"Detector cases: {detector_metrics}")
+        critical_matchers = {
+            "Docker Registry Auth",
+            "Netrc Password",
+            "PostgreSQL Password File",
+        }
+        incorrect_severity = [
+            case.name
+            for case in cases
+            if case.expected_matcher in critical_matchers
+            and any(
+                issue["matcher"] == case.expected_matcher
+                and issue["severity"] != "CRITICAL"
+                for issue in scan_text(case.content, case.source or case.name)
+            )
+        ]
         false_positive_cases = [
             case.name
             for case in cases
-            if not case.should_detect and scan_text(case.content, case.name)
+            if not case.should_detect
+            and scan_text(case.content, case.source or case.name)
         ]
         false_negative_cases = [
             case.name
             for case in cases
-            if case.should_detect and not scan_text(case.content, case.name)
+            if case.should_detect
+            and not scan_text(case.content, case.source or case.name)
         ]
+        self.assertEqual(unlabeled_cases, [])
+        self.assertEqual(missing_matchers, [])
+        self.assertEqual(incorrect_severity, [])
         self.assertEqual(false_positive, 0, false_positive_cases)
         self.assertEqual(false_negative, 0, false_negative_cases)
 

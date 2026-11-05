@@ -1,5 +1,6 @@
 """Scanner engine for detecting secrets in files and git staged changes."""
 
+import base64
 import fnmatch
 import os
 import re
@@ -63,6 +64,15 @@ PLACEHOLDER_VALUE_PATTERN = re.compile(
     r"|insert[_-](?:your[_-])?.+"
     r"|placeholder|example|sample|dummy|redacted|x{3,}"
     r")$"
+)
+NETRC_PASSWORD_PATTERN = re.compile(
+    r"(?i)\b(?:password|passwd|pass)\s+['\"]?(\S+)"
+)
+PGPASS_ENTRY_PATTERN = re.compile(
+    r"^([^:#\s][^:]*):([^:]*):([^:]*):([^:]*):((?:\\.|[^:\s])+)\s*$"
+)
+DOCKER_AUTH_PATTERN = re.compile(
+    r"""(?i)["']auth["']\s*:\s*["']([A-Za-z0-9+/]+={0,2})["']"""
 )
 DIFF_HUNK_PATTERN = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
 ENTROPY_THRESHOLD = 4.6
@@ -243,9 +253,57 @@ def _scan_line(
 ) -> List[Dict[str, Any]]:
     """Return unsuppressed detector matches found on one source line."""
     issues: List[Dict[str, Any]] = []
+    source_path = Path(source)
+    if source_path.name == ".netrc":
+        for match in NETRC_PASSWORD_PATTERN.finditer(line):
+            if PLACEHOLDER_VALUE_PATTERN.fullmatch(match.group(1)):
+                continue
+            issues.append(_build_issue(
+                source,
+                lineno,
+                line,
+                "Netrc Password",
+                match.group(1),
+            ))
+    if source_path.name == ".pgpass":
+        match = PGPASS_ENTRY_PATTERN.fullmatch(line)
+        if (
+            match
+            and match.group(5) != "*"
+            and not PLACEHOLDER_VALUE_PATTERN.fullmatch(match.group(5))
+        ):
+            issues.append(_build_issue(
+                source,
+                lineno,
+                line,
+                "PostgreSQL Password File",
+                match.group(5),
+            ))
+    if source_path.name == ".dockercfg" or (
+        source_path.name == "config.json" and ".docker" in source_path.parts
+    ):
+        for match in DOCKER_AUTH_PATTERN.finditer(line):
+            try:
+                decoded_auth = base64.b64decode(match.group(1), validate=True)
+            except ValueError:
+                continue
+            if decoded_auth.partition(b":")[0] and decoded_auth.partition(b":")[2]:
+                issues.append(_build_issue(
+                    source,
+                    lineno,
+                    line,
+                    "Docker Registry Auth",
+                    match.group(1),
+                ))
     for name, pattern in SECRET_PATTERNS.items():
         for match in pattern.finditer(line):
             value = match.group(1) if match.groups() else match.group(0)
+            if name == "Generic Secret Assignment" and any(
+                issue["matcher"] == "Docker Registry Auth"
+                and issue["value"] == value
+                for issue in issues
+            ):
+                continue
             if name in {
                 "Database Connection URI",
                 "Generic Secret Assignment",
@@ -307,6 +365,27 @@ def _scan_line(
                 }
             )
     return issues
+
+
+def _build_issue(
+    source: str,
+    lineno: int,
+    line: str,
+    matcher: str,
+    value: str,
+) -> Dict[str, Any]:
+    """Build a standard pattern finding."""
+    severity = get_risk_score(matcher)
+    return {
+        "source": source,
+        "line": lineno,
+        "matcher": matcher,
+        "value": value,
+        "snippet": line.strip(),
+        "confidence": "high",
+        "reason": "pattern",
+        "severity": severity.name,
+    }
 
 
 def scan_text(
