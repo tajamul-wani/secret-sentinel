@@ -13,7 +13,7 @@ _DETECTION_EXPLANATIONS = {
     "custom-pattern": ("custom-pattern", "A configured custom rule matched."),
     "entropy": (
         "entropy",
-        "A secret-related keyword appeared beside a high-entropy string.",
+        "A high-entropy string was assigned to a secret-related field.",
     ),
 }
 _CONFIDENCE_LEVELS = {"high", "medium", "low"}

@@ -15,8 +15,9 @@ from secret_sentinel.utils import mask_secret, sanitize_snippet
 
 # Construct tokens dynamically so they are never stored as contiguous raw secrets in git diffs
 DUMMY_AWS = "AKIA" + "1234567890ABCDEF"
+DUMMY_AWS_SECRET = "AbCd1234" * 5
 DUMMY_GOOGLE = "AIza" + "SyD-1234567890abcdefghijklmnopqrs12"
-DUMMY_STRIPE = "pk_test_" + "123456789012345678901234"
+DUMMY_STRIPE = "sk_test_" + "123456789012345678901234"
 DUMMY_GITHUB = "ghp_" + "123456789012345678901234567890123456"
 DUMMY_SLACK = "xoxb-" + "1234567890-" + "abcdefghij"
 DUMMY_TWILIO = "SK" + "1234567890abcdef" + "1234567890abcdef"
@@ -34,7 +35,8 @@ class TestSecurityAndLeakPrevention(unittest.TestCase):
     def test_scanner_summary_never_exposes_plain_secret(self) -> None:
         """Verify findings summaries never contain the raw secret."""
         secrets_to_test = [
-            (DUMMY_AWS, "AWS Secret Access Key"),
+            (DUMMY_AWS, "AWS Access Key ID"),
+            (DUMMY_AWS_SECRET, "AWS Secret Access Key"),
             (DUMMY_GOOGLE, "Google API Key"),
             (DUMMY_STRIPE, "Stripe API Key"),
             (DUMMY_GITHUB, "GitHub Token"),
@@ -49,7 +51,12 @@ class TestSecurityAndLeakPrevention(unittest.TestCase):
         ]
 
         for secret, expected_matcher in secrets_to_test:
-            code = f'credentials = "{secret}"\n'
+            field_name = (
+                "aws_secret_access_key"
+                if expected_matcher == "AWS Secret Access Key"
+                else "credentials"
+            )
+            code = f'{field_name} = "{secret}"\n'
             issues = scan_text(code, "config.py")
             self.assertTrue(len(issues) >= 1)
 

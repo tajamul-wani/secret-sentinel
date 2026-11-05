@@ -13,9 +13,14 @@ from .utils import is_text_bytes, sanitize_snippet, shannon_entropy
 from .risk_scoring import get_risk_score
 
 SECRET_PATTERNS = {
-    "AWS Secret Access Key": re.compile(r"\b(?:AKIA|ASIA|AGPA|AIDA|ANPA|AROA|AIPA|ANVA)[0-9A-Z]{16}\b"),
+    "AWS Access Key ID": re.compile(
+        r"\b(?:AKIA|ASIA|AGPA|AIDA|ANPA|AROA|AIPA|ANVA)[0-9A-Z]{16}\b"
+    ),
+    "AWS Secret Access Key": re.compile(
+        r"""(?i)\baws[_\-]?secret[_\-]?access[_\-]?key\b\s*[:=]\s*["']?([A-Za-z0-9/+=]{40})(?![A-Za-z0-9/+=])["']?"""
+    ),
     "Google API Key": re.compile(r"\bAIza[0-9A-Za-z\-_]{35}\b"),
-    "Stripe API Key": re.compile(r"\bpk_(?:test|live)_[A-Za-z0-9]{24}\b"),
+    "Stripe API Key": re.compile(r"\b(?:sk|rk)_(?:test|live)_[A-Za-z0-9]{24,}\b"),
     "GitHub Token": re.compile(r"\bghp_[A-Za-z0-9_]{36}\b"),
     "Slack Token": re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{10,}\b"),
     "JWT": re.compile(r"\beyJ[0-9A-Za-z_\-]+\.[0-9A-Za-z_\-]+\.[0-9A-Za-z_\-]+\b"),
@@ -36,7 +41,12 @@ SUPPRESSION_DIRECTIVE_PATTERN = re.compile(
     r"(?P<action>disable[-_]next[-_]line|ignore)\b(?P<metadata>.*?)(?:\*/)?\s*$"
 )
 SUPPRESSION_EXPIRY_PATTERN = re.compile(r"(?i)\bexpires?\s*[:=]\s*([^\s;,*/]+)")
-SECRET_STRING_PATTERN = re.compile(r"[\"']([A-Za-z0-9+/=_.-]{24,})[\"']")
+SECRET_ASSIGNMENT_PATTERN = re.compile(
+    r"""(?i)(?:^|[\W_])["']?"""
+    r"""(?:secret|token|api[_\-]?key|password|passwd|auth|credential|client_secret|private_key|oauth[_\-]?token)"""
+    r"""(?:[_\-](?:secret|token|key|password|credential|value))?["']?\s*[:=]\s*"""
+    r"""(?P<quote>["'])(?P<value>[^"']+)(?P=quote)"""
+)
 DIFF_HUNK_PATTERN = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
 ENTROPY_THRESHOLD = 4.6
 MIN_ENTROPY_LENGTH = 24
@@ -177,23 +187,6 @@ def _is_ignored(path: str, ignore_globs: List[str], repo_root: Optional[str] = N
     return False
 
 
-def _line_has_secret_keyword(line: str) -> bool:
-    """Check whether a line contains keywords typically associated with secrets.
-
-    Args:
-        line: Text line to inspect.
-
-    Returns:
-        True if a secret keyword is found.
-    """
-    return bool(
-        re.search(
-            r"(?i)(?:^|[\W_])(secret|token|api[_\-]?key|password|passwd|auth|credential|client_secret|private_key|oauth[_\-]?token)(?:[\W_]|$)",
-            line,
-        )
-    )
-
-
 def _suppression_is_active(metadata: str) -> bool:
     """Return whether a suppression directive has not expired."""
     expiry_status = _suppression_expiry_status(metadata)
@@ -263,11 +256,11 @@ def _scan_line(
                     "severity": rule.severity.name,
                 }
             )
-    for match in SECRET_STRING_PATTERN.finditer(line):
-        value = match.group(1)
+    for match in SECRET_ASSIGNMENT_PATTERN.finditer(line):
+        value = match.group("value")
         if len(value) < MIN_ENTROPY_LENGTH:
             continue
-        if not _line_has_secret_keyword(line):
+        if any(issue["value"] == value for issue in issues):
             continue
         entropy = shannon_entropy(value)
         if entropy >= ENTROPY_THRESHOLD:

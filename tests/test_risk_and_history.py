@@ -1,8 +1,6 @@
 """Tests for risk scoring and history modules."""
 
-import json
 import tempfile
-from pathlib import Path
 from unittest import TestCase
 
 from secret_sentinel.risk_scoring import (
@@ -28,6 +26,7 @@ class TestRiskScoring(TestCase):
 
     def test_get_risk_score_medium(self):
         """Test that entropy strings are scored as MEDIUM."""
+        assert get_risk_score("AWS Access Key ID") == SeverityLevel.MEDIUM
         assert get_risk_score("High entropy string") == SeverityLevel.MEDIUM
 
     def test_get_risk_score_unknown(self):

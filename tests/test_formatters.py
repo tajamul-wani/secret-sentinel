@@ -83,7 +83,8 @@ class TestFormatters(unittest.TestCase):
         }
         result = format_text([issue])
         self.assertIn(
-            "Why flagged: A secret-related keyword appeared beside a high-entropy string.",
+            "Why flagged: A high-entropy string was assigned "
+            "to a secret-related field.",
             result,
         )
         self.assertIn("Confidence: medium.", result)
