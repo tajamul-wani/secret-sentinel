@@ -46,6 +46,7 @@ def build_cases() -> List[DetectionCase]:
     npm_token = "npm_" + "1234567890abcdefghijklmnopqrstuvwxyz"
     service_secret = "svc_" + "a1b2c3d4e5f6g7h8i9j0k1l2"
     access_token = "tok_" + "a1b2c3d4e5f6g7h8i9j0k1l2"
+    legacy_secret = "aB3dE5gH7jK9mP2rS4vX6zC8"
     high_entropy_value = "K9zXwQ7p.L2vM5yB8.tR4cE1aD3.fG6hJ0n"
     unrelated_entropy = "P8mQ2rV6xN4bK9sT1wC7dF3hJ5aL0eG"
     jwt = (
@@ -145,6 +146,31 @@ def build_cases() -> List[DetectionCase]:
         DetectionCase(
             "Shell exported token",
             f"export DEPLOYMENT_TOKEN={access_token}",
+            True,
+        ),
+        DetectionCase(
+            "Laravel base64 application key",
+            f"APP_KEY=base64:{legacy_secret}",
+            True,
+        ),
+        DetectionCase(
+            "Rails secret key base",
+            f'secret_key_base = "{legacy_secret}"',
+            True,
+        ),
+        DetectionCase(
+            "Rails master key",
+            f'master_key = "{legacy_secret}"',
+            True,
+        ),
+        DetectionCase(
+            "Legacy password field",
+            f'pass = "{legacy_secret}"',
+            True,
+        ),
+        DetectionCase(
+            "XML password attribute",
+            f'<server password="{legacy_secret}" />',
             True,
         ),
         DetectionCase(
@@ -267,6 +293,21 @@ def build_cases() -> List[DetectionCase]:
         DetectionCase(
             "Terraform variable description",
             'description = "Supply the database password at deploy time."',
+            False,
+        ),
+        DetectionCase(
+            "Public key setting",
+            f'public_key = "{legacy_secret}"',
+            False,
+        ),
+        DetectionCase(
+            "Client identifier",
+            f'client_id = "{legacy_secret}"',
+            False,
+        ),
+        DetectionCase(
+            "Application key environment reference",
+            'APP_KEY="${APP_KEY}"',
             False,
         ),
     ]
