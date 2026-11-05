@@ -2,7 +2,6 @@
 
 import json
 import unittest
-from io import BytesIO
 from unittest.mock import MagicMock, patch
 
 from secret_sentinel.ai_validator import (
@@ -44,17 +43,33 @@ class TestAIValidator(unittest.TestCase):
                 self.assertTrue(validate_issue(issue, "surrounding code"))
 
     def test_validate_issue_fallback_medium_confidence(self) -> None:
-        """Fallback without AI should reject low/medium confidence issues if AI unavailable."""
+        """Fallback without AI should preserve medium-confidence findings."""
         issue = {"value": "entropy_string", "confidence": "medium"}
         with patch("secret_sentinel.ai_validator._query_ollama", return_value=None):
             with patch("secret_sentinel.ai_validator._query_gemini", return_value=None):
-                self.assertFalse(validate_issue(issue, "surrounding code"))
+                self.assertTrue(validate_issue(issue, "surrounding code"))
 
     def test_validate_issue_ai_marks_false_positive(self) -> None:
         """AI returning FALSE_POSITIVE should cause validation to return False."""
         issue = {"value": "mock_token", "confidence": "high"}
         with patch("secret_sentinel.ai_validator._query_ollama", return_value="FALSE_POSITIVE"):
             self.assertFalse(validate_issue(issue, "surrounding code"))
+
+    def test_validate_issue_requires_exact_false_positive_response(self) -> None:
+        """Explanatory or malformed responses should not discard a finding."""
+        issue = {"value": "mock_token", "confidence": "medium"}
+        responses = (
+            "The answer is FALSE_POSITIVE",
+            "FALSE_POSITIVE because the value looks like a placeholder",
+            "UNKNOWN",
+        )
+        for response in responses:
+            with self.subTest(response=response):
+                with patch(
+                    "secret_sentinel.ai_validator._query_ollama",
+                    return_value=response,
+                ):
+                    self.assertTrue(validate_issue(issue, "surrounding code"))
 
     def test_validate_issue_ai_confirms_real_secret(self) -> None:
         """AI returning REAL_SECRET should cause validation to return True."""
