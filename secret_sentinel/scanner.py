@@ -47,6 +47,15 @@ SECRET_ASSIGNMENT_PATTERN = re.compile(
     r"""(?:[_\-](?:secret|token|key|password|credential|value))?["']?\s*[:=]\s*"""
     r"""(?P<quote>["'])(?P<value>[^"']+)(?P=quote)"""
 )
+PLACEHOLDER_VALUE_PATTERN = re.compile(
+    r"(?i)^(?:"
+    r"your(?:[_-](?:api[_-]?key|token|secret|password|credential))?[_-]?here"
+    r"|replace[_-](?:with[_-])?.+"
+    r"|change[_-](?:this|me)(?:[_-].*)?"
+    r"|insert[_-](?:your[_-])?.+"
+    r"|placeholder|example|sample|dummy|redacted|x{3,}"
+    r")$"
+)
 DIFF_HUNK_PATTERN = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
 ENTROPY_THRESHOLD = 4.6
 MIN_ENTROPY_LENGTH = 24
@@ -229,6 +238,11 @@ def _scan_line(
     for name, pattern in SECRET_PATTERNS.items():
         for match in pattern.finditer(line):
             value = match.group(1) if match.groups() else match.group(0)
+            if (
+                name == "Generic Secret Assignment"
+                and PLACEHOLDER_VALUE_PATTERN.fullmatch(value)
+            ):
+                continue
             severity = get_risk_score(name)
             issues.append(
                 {
