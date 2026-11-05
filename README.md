@@ -181,14 +181,22 @@ first, and show a suggested next step. Successful text scans report:
 
 ### Risk Scoring
 
-Each detected secret is assigned a severity level based on its type:
+Each finding is assigned a severity level based on its type:
 
-- **CRITICAL**: AWS keys, API tokens (Stripe, GitHub, Slack, Google), Twilio keys, Private keys, Database connection URIs, OpenAI / Anthropic / HuggingFace / PyPI / NPM tokens
+- **CRITICAL**: AWS secret access keys, secret API tokens (Stripe, GitHub,
+  Slack, Google), Twilio keys, private keys, database connection URIs, and
+  OpenAI / Anthropic / HuggingFace / PyPI / NPM tokens
 - **HIGH**: JWT tokens, generic secret assignments
-- **MEDIUM**: High-entropy strings detected via pattern matching
+- **MEDIUM**: AWS access key IDs and high-entropy values assigned to secret-related fields
 - **LOW**: Other potential secrets
 
-The overall severity of a scan is determined by the highest severity issue found.
+An AWS access key ID identifies a credential but cannot authenticate requests
+on its own. A matching secret access key is required.
+
+The scanner uses known formats and heuristics. It can miss unfamiliar
+credentials and may flag harmless values. A small synthetic regression corpus
+checks common cases; its results are not a measure of real-world accuracy. Run
+it with `python tests/test_detection_quality.py`.
 
 ### Responding to Findings
 
@@ -232,7 +240,7 @@ secret-sentinel --baseline .
 ```
 
 The baseline is stored at `.secret-sentinel/baseline.json`. It contains
-HMAC-SHA-256 fingerprints of each finding's path, rule, and detected value—not
+HMAC-SHA-256 fingerprints of each finding's path, rule, and detected value, not
 the secret value itself. Baseline operations require the same independently
 generated key in `SECRET_SENTINEL_BASELINE_KEY` on every machine and CI job that
 uses the baseline. Generate a key with
@@ -326,7 +334,7 @@ secret-sentinel . --format sarif --output results.sarif
 
 Text, JSON, and SARIF findings include a short explanation of the detection
 signal and its confidence where available. Entropy-based findings explain that
-a secret-related keyword and a high-entropy string were found together.
+high-entropy values were assigned to secret-related fields.
 Reported snippets remain redacted.
 
 ### Inline Ignore Directives
@@ -441,6 +449,8 @@ Ollama, set `ai_enabled = true`. Cloud Gemini validation is a separate opt-in:
 set both `ai_enabled = true` and `ai_cloud_enabled = true`, and configure
 `GEMINI_API_KEY`. Detected secret values are redacted before context is sent to
 either AI validator; cloud validation is attempted only when explicitly enabled.
+AI validation removes a finding only when it returns the exact
+`FALSE_POSITIVE` label. Unavailable or unclear responses keep the finding.
 
 ### Using `.secretignore`
 
