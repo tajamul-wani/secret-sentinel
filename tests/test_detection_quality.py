@@ -44,6 +44,8 @@ def build_cases() -> List[DetectionCase]:
         + "1234567890abcdefghijklmnopqrstuvwxyz1234567890abcdef"
     )
     npm_token = "npm_" + "1234567890abcdefghijklmnopqrstuvwxyz"
+    service_secret = "svc_" + "a1b2c3d4e5f6g7h8i9j0k1l2"
+    access_token = "tok_" + "a1b2c3d4e5f6g7h8i9j0k1l2"
     high_entropy_value = "K9zXwQ7p.L2vM5yB8.tR4cE1aD3.fG6hJ0n"
     unrelated_entropy = "P8mQ2rV6xN4bK9sT1wC7dF3hJ5aL0eG"
     jwt = (
@@ -110,6 +112,41 @@ def build_cases() -> List[DetectionCase]:
         DetectionCase("Hugging Face token", f"HF_TOKEN={huggingface_token}", True),
         DetectionCase("PyPI upload token", f'pypi_token = "{pypi_token}"', True),
         DetectionCase("npm access token", f"NPM_TOKEN={npm_token}", True),
+        DetectionCase(
+            "dotenv prefixed API key",
+            f"PAYMENTS_API_KEY={generic_token}",
+            True,
+        ),
+        DetectionCase(
+            "YAML service token",
+            f'service_token: "{service_secret}"',
+            True,
+        ),
+        DetectionCase(
+            "JSON client secret",
+            f'{{"client_secret": "{service_secret}"}}',
+            True,
+        ),
+        DetectionCase(
+            "TOML OAuth token",
+            f'oauth_token = "{access_token}"',
+            True,
+        ),
+        DetectionCase(
+            "Python camel-case client secret",
+            f'clientSecret = "{service_secret}"',
+            True,
+        ),
+        DetectionCase(
+            "JavaScript camel-case access token",
+            f'const accessToken = "{access_token}";',
+            True,
+        ),
+        DetectionCase(
+            "Shell exported token",
+            f"export DEPLOYMENT_TOKEN={access_token}",
+            True,
+        ),
         DetectionCase(
             "High-entropy secret field",
             f'secret = "{high_entropy_value}"',
@@ -199,6 +236,37 @@ def build_cases() -> List[DetectionCase]:
         DetectionCase(
             "Example account credentials",
             '{"username": "demo", "password": "password"}',
+            False,
+        ),
+        DetectionCase(
+            "Database URI with environment placeholder",
+            "database_url = "
+            '"postgresql://app:${DB_PASSWORD}@db.example.com/app"',
+            False,
+        ),
+        DetectionCase(
+            "Database URI with shell variable",
+            'database_url = "mysql://app:$DB_PASSWORD@db.example.com/app"',
+            False,
+        ),
+        DetectionCase(
+            "Database URI with template placeholder",
+            'database_url = "redis://app:{{ redis_password }}@cache.example.com/0"',
+            False,
+        ),
+        DetectionCase(
+            "Public client configuration",
+            'const publicKey = "use-the-public-client-identifier";',
+            False,
+        ),
+        DetectionCase(
+            "Secret environment variable reference",
+            'service_token = "${DEPLOYMENT_TOKEN}"',
+            False,
+        ),
+        DetectionCase(
+            "Terraform variable description",
+            'description = "Supply the database password at deploy time."',
             False,
         ),
     ]
