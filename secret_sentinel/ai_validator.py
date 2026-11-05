@@ -150,10 +150,10 @@ def validate_issue(
     if not response and allow_cloud:
         response = _query_gemini(prompt)
     if not response:
-        return issue.get("confidence") == "high"
+        return True
 
     normalized = response.strip().upper()
-    if "FALSE_POSITIVE" in normalized:
+    if normalized == "FALSE_POSITIVE":
         return False
     return True
 
