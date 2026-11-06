@@ -1,6 +1,7 @@
 """Tests for Secret Sentinel scanner engine."""
 
 import os
+import base64
 import re
 import subprocess
 import tempfile
@@ -11,6 +12,7 @@ from unittest.mock import MagicMock, patch
 from secret_sentinel.config import CustomRule
 from secret_sentinel.risk_scoring import SeverityLevel
 from secret_sentinel.scanner import (
+    ScanCoverage,
     _is_ignored,
     _normalize_path,
     _sanitize_source_path,
@@ -474,6 +476,7 @@ class TestScanner(unittest.TestCase):
         self.assertEqual(match["value"], value)
         self.assertEqual(match["severity"], "CRITICAL")
         self.assertEqual(match["reason"], "custom-pattern")
+        self.assertEqual(match["confidence"], "medium")
 
     def test_scan_text_detects_google_key(self) -> None:
         """Detect Google API keys."""
@@ -708,6 +711,58 @@ class TestScanner(unittest.TestCase):
         issues = scan_text(content, "settings.yml")
         self.assertTrue(any(i["matcher"] == "Generic Secret Assignment" for i in issues))
         self.assertEqual(len(issues), 1)
+        self.assertEqual(issues[0]["confidence"], "medium")
+
+    def test_scan_text_detects_encoded_provider_token(self) -> None:
+        """Recognize known token formats after base64 decoding secret fields."""
+        encoded_token = base64.b64encode(DUMMY_GITHUB.encode()).decode()
+        issues = scan_text(f'token = "{encoded_token}"', "settings.py")
+
+        encoded_findings = [
+            issue for issue in issues if issue["reason"] == "encoded-pattern"
+        ]
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(len(encoded_findings), 1)
+        self.assertEqual(encoded_findings[0]["matcher"], "GitHub Token")
+        self.assertEqual(encoded_findings[0]["value"], encoded_token)
+        self.assertNotIn(DUMMY_GITHUB, repr(issues))
+
+    def test_scan_text_reports_complete_private_key_block(self) -> None:
+        """A complete key block is one finding located on its header."""
+        content = (
+            "before = True\n"
+            "-----BEGIN RSA PRIVATE KEY-----\n"
+            "synthetic-private-key-material\n"
+            "-----END RSA PRIVATE KEY-----\n"
+        )
+
+        issues = scan_text(content, "key.pem")
+
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(issues[0]["matcher"], "Private Key")
+        self.assertEqual(issues[0]["line"], 2)
+        self.assertEqual(issues[0]["reason"], "private-key-block")
+        self.assertEqual(issues[0]["confidence"], "high")
+        self.assertIn("synthetic-private-key-material", issues[0]["value"])
+
+    def test_private_key_header_alone_has_low_confidence(self) -> None:
+        """A key header without its body is a weaker signal than a full block."""
+        issues = scan_text("-----BEGIN RSA PRIVATE KEY-----", "key.pem")
+
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(issues[0]["confidence"], "low")
+        self.assertEqual(issues[0]["reason"], "private-key-header")
+
+    def test_private_key_block_respects_header_suppression(self) -> None:
+        """A suppression on the key header also suppresses its multiline finding."""
+        content = (
+            "# secret-sentinel: disable-next-line reason: fixture; expires: 2999-12-31\n"
+            "-----BEGIN RSA PRIVATE KEY-----\n"
+            "synthetic-private-key-material\n"
+            "-----END RSA PRIVATE KEY-----\n"
+        )
+
+        self.assertEqual(scan_text(content, "key.pem"), [])
 
     def test_scan_text_detects_high_entropy_string(self) -> None:
         """Detect high-entropy values assigned to secret-related fields."""
@@ -818,6 +873,34 @@ class TestScanner(unittest.TestCase):
             # Nonexistent file check
             nonexistent = scan_paths([os.path.join(tmpdir, "missing.py")])
             self.assertEqual(len(nonexistent), 0)
+
+    def test_scan_paths_reports_coverage_counts(self) -> None:
+        """Coverage distinguishes scanned, ignored, binary, and missing paths."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with open(os.path.join(tmpdir, "clean.py"), "w", encoding="utf-8") as handle:
+                handle.write("value = 1\n")
+            with open(os.path.join(tmpdir, "ignored.txt"), "w", encoding="utf-8") as handle:
+                handle.write("ignored\n")
+            with open(os.path.join(tmpdir, "binary.bin"), "wb") as handle:
+                handle.write(b"\x00binary")
+
+            coverage = ScanCoverage()
+            scan_paths(
+                [tmpdir, os.path.join(tmpdir, "missing.py")],
+                ignore_globs=["*ignored.txt"],
+                coverage=coverage,
+            )
+
+        self.assertEqual(
+            coverage.as_dict(),
+            {
+                "scanned_files": 1,
+                "ignored_paths": 1,
+                "binary_files": 1,
+                "unreadable_paths": 0,
+                "missing_paths": 1,
+            },
+        )
 
     def test_scan_staged_files(self) -> None:
         """Scan staged files using mocked git output."""

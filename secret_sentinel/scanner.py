@@ -5,6 +5,7 @@ import fnmatch
 import os
 import re
 import subprocess
+from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 from typing import Dict, List, Optional, Any
@@ -12,6 +13,8 @@ from typing import Dict, List, Optional, Any
 from .config import CustomRule
 from .utils import is_text_bytes, sanitize_snippet, shannon_entropy
 from .risk_scoring import get_risk_score
+
+RULE_PACK_VERSION = "1"
 
 SECRET_PATTERNS = {
     "AWS Access Key ID": re.compile(
@@ -42,6 +45,11 @@ SECRET_PATTERNS = {
         r"([A-Za-z0-9_\-+\/=]{16,})[\"']?"
     ),
 }
+PRIVATE_KEY_BLOCK_PATTERN = re.compile(
+    r"-----BEGIN (?P<key_type>[A-Z0-9 ]*PRIVATE KEY)-----"
+    r".*?-----END (?P=key_type)-----",
+    re.DOTALL,
+)
 SUPPRESSION_DIRECTIVE_PATTERN = re.compile(
     r"(?i)(?:#|//|/\*)\s*secret[-_]?sentinel:\s*"
     r"(?P<action>disable[-_]next[-_]line|ignore)\b(?P<metadata>.*?)(?:\*/)?\s*$"
@@ -77,6 +85,7 @@ DOCKER_AUTH_PATTERN = re.compile(
 DIFF_HUNK_PATTERN = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
 ENTROPY_THRESHOLD = 4.6
 MIN_ENTROPY_LENGTH = 24
+MAX_ENCODED_VALUE_LENGTH = 4096
 DEFAULT_IGNORE = [
     "__pycache__/*",
     "*.py[cod]",
@@ -91,6 +100,27 @@ DEFAULT_IGNORE = [
     ".secret-sentinel/*",
     "node_modules/*",
 ]
+
+
+@dataclass
+class ScanCoverage:
+    """Counts files scanned and skipped during an explicit disk-path scan."""
+
+    scanned_files: int = 0
+    ignored_paths: int = 0
+    binary_files: int = 0
+    unreadable_paths: int = 0
+    missing_paths: int = 0
+
+    def as_dict(self) -> Dict[str, int]:
+        """Return coverage counts in a serialization-friendly form."""
+        return {
+            "scanned_files": self.scanned_files,
+            "ignored_paths": self.ignored_paths,
+            "binary_files": self.binary_files,
+            "unreadable_paths": self.unreadable_paths,
+            "missing_paths": self.missing_paths,
+        }
 
 
 def _run_git_command(args: List[str], cwd: Optional[str] = None, text: bool = True) -> subprocess.CompletedProcess:
@@ -317,8 +347,18 @@ def _scan_line(
                     "matcher": name,
                     "value": value,
                     "snippet": line.strip(),
-                    "confidence": "high",
-                    "reason": "pattern",
+                    "confidence": (
+                        "medium"
+                        if name == "Generic Secret Assignment"
+                        else "low"
+                        if name == "Private Key"
+                        else "high"
+                    ),
+                    "reason": (
+                        "private-key-header"
+                        if name == "Private Key"
+                        else "pattern"
+                    ),
                     "severity": severity.name,
                 }
             )
@@ -337,7 +377,7 @@ def _scan_line(
                     "matcher": rule.name,
                     "value": value,
                     "snippet": line.strip(),
-                    "confidence": "high",
+                    "confidence": "medium",
                     "reason": "custom-pattern",
                     "severity": rule.severity.name,
                 }
@@ -408,10 +448,12 @@ def scan_text(
     issues = []
     lines = content.splitlines()
     skip_next_line = False
+    suppressed_lines = set()
 
     for lineno, line in enumerate(lines, start=1):
         if skip_next_line:
             skip_next_line = False
+            suppressed_lines.add(lineno)
             continue
 
         directive = SUPPRESSION_DIRECTIVE_PATTERN.search(line)
@@ -419,10 +461,78 @@ def scan_text(
             if directive.group("action").lower().startswith("disable"):
                 skip_next_line = True
             else:
+                suppressed_lines.add(lineno)
                 continue
             continue
 
         issues.extend(_scan_line(line, lineno, source, custom_rules))
+
+    for match in PRIVATE_KEY_BLOCK_PATTERN.finditer(content):
+        lineno = content.count("\n", 0, match.start()) + 1
+        if lineno in suppressed_lines:
+            continue
+        issues = [
+            issue
+            for issue in issues
+            if not (
+                issue["matcher"] == "Private Key"
+                and issue["line"] == lineno
+            )
+        ]
+        header = lines[lineno - 1].strip() if lineno <= len(lines) else ""
+        issues.append(
+            {
+                "source": source,
+                "line": lineno,
+                "matcher": "Private Key",
+                "value": match.group(0),
+                "snippet": header,
+                "confidence": "high",
+                "reason": "private-key-block",
+                "severity": get_risk_score("Private Key").name,
+            }
+        )
+
+    for issue in list(issues):
+        if issue["matcher"] not in {
+            "Generic Secret Assignment",
+            "High entropy string",
+        }:
+            continue
+        encoded_value = str(issue["value"])
+        if not 24 <= len(encoded_value) <= MAX_ENCODED_VALUE_LENGTH:
+            continue
+        padded_value = encoded_value + "=" * (-len(encoded_value) % 4)
+        try:
+            decoded = base64.b64decode(
+                padded_value,
+                altchars=b"-_",
+                validate=True,
+            ).decode("utf-8")
+        except (ValueError, UnicodeDecodeError):
+            continue
+        if any(ord(character) < 32 and character not in "\r\n\t" for character in decoded):
+            continue
+        for name, pattern in SECRET_PATTERNS.items():
+            if name == "Generic Secret Assignment":
+                continue
+            decoded_match = pattern.search(decoded)
+            if not decoded_match:
+                continue
+            issues = [finding for finding in issues if finding is not issue]
+            issues.append(
+                {
+                    "source": source,
+                    "line": issue["line"],
+                    "matcher": name,
+                    "value": encoded_value,
+                    "snippet": issue["snippet"],
+                    "confidence": "medium",
+                    "reason": "encoded-pattern",
+                    "severity": get_risk_score(name).name,
+                }
+            )
+            break
     return issues
 
 
@@ -957,6 +1067,7 @@ def scan_paths(
     ignore_globs: Optional[List[str]] = None,
     repo_root: Optional[str] = None,
     custom_rules: Optional[List[CustomRule]] = None,
+    coverage: Optional[ScanCoverage] = None,
 ) -> List[Dict[str, Any]]:
     """Scan specified file and directory paths on disk.
 
@@ -972,42 +1083,66 @@ def scan_paths(
     active_ignores = ignore_globs or DEFAULT_IGNORE
     for path in paths:
         if os.path.isdir(path):
-            for root, dirs, files in os.walk(path):
+            def record_walk_error(_: OSError) -> None:
+                if coverage is not None:
+                    coverage.unreadable_paths += 1
+
+            for root, dirs, files in os.walk(path, onerror=record_walk_error):
                 if _is_ignored(root, active_ignores, repo_root):
+                    if coverage is not None:
+                        coverage.ignored_paths += 1
                     dirs[:] = []
                     continue
                 if ".git" in root.split(os.sep):
+                    if coverage is not None:
+                        coverage.ignored_paths += 1
                     dirs[:] = []
                     continue
                 for file_name in files:
                     full_path = os.path.join(root, file_name)
                     if _is_ignored(full_path, active_ignores, repo_root):
+                        if coverage is not None:
+                            coverage.ignored_paths += 1
                         continue
                     try:
                         with open(full_path, "rb") as handle:
-                            data = handle.read(2048)
-                            if not is_text_bytes(data):
-                                continue
-                        with open(full_path, "r", encoding="utf-8", errors="replace") as handle:
-                            content = handle.read()
+                            data = handle.read()
                     except OSError:
+                        if coverage is not None:
+                            coverage.unreadable_paths += 1
                         continue
+                    if not is_text_bytes(data[:2048]):
+                        if coverage is not None:
+                            coverage.binary_files += 1
+                        continue
+                    content = data.decode("utf-8", errors="replace")
+                    if coverage is not None:
+                        coverage.scanned_files += 1
                     safe_source = _sanitize_source_path(full_path, repo_root)
                     issues.extend(scan_text(content, safe_source, custom_rules=custom_rules))
             continue
         if not os.path.isfile(path):
+            if coverage is not None:
+                coverage.missing_paths += 1
             continue
         if _is_ignored(path, active_ignores, repo_root):
+            if coverage is not None:
+                coverage.ignored_paths += 1
             continue
         try:
             with open(path, "rb") as handle:
-                data = handle.read(2048)
-                if not is_text_bytes(data):
-                    continue
-            with open(path, "r", encoding="utf-8", errors="replace") as handle:
-                content = handle.read()
+                data = handle.read()
         except OSError:
+            if coverage is not None:
+                coverage.unreadable_paths += 1
             continue
+        if not is_text_bytes(data[:2048]):
+            if coverage is not None:
+                coverage.binary_files += 1
+            continue
+        content = data.decode("utf-8", errors="replace")
+        if coverage is not None:
+            coverage.scanned_files += 1
         safe_source = _sanitize_source_path(path, repo_root)
         issues.extend(scan_text(content, safe_source, custom_rules=custom_rules))
     return issues
