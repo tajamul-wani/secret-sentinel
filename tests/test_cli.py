@@ -54,6 +54,11 @@ class TestCLI(unittest.TestCase):
         self.assertFalse(args.staged)
         self.assertFalse(args.no_ai)
         self.assertFalse(args.debug)
+        self.assertFalse(args.coverage)
+
+    def test_parse_args_for_coverage(self) -> None:
+        """Parse the optional explicit-path coverage report switch."""
+        self.assertTrue(parse_args([".", "--coverage"]).coverage)
 
     def test_parse_args_for_staged_scan(self) -> None:
         """Test parsing --staged and --no-ai."""
@@ -1308,6 +1313,31 @@ class TestCLI(unittest.TestCase):
         with patch("secret_sentinel.cli.scan_paths", return_value=[]):
             with patch("secret_sentinel.cli.get_git_root", return_value=None):
                 self.assertEqual(main(["--format", "json", "--no-ai"]), 0)
+
+    def test_main_coverage_requires_explicit_disk_paths(self) -> None:
+        """Coverage mode rejects implicit staged scans."""
+        with patch("secret_sentinel.cli.get_git_root", return_value=None):
+            self.assertEqual(main(["--coverage"]), 2)
+
+    def test_main_reports_explicit_disk_scan_coverage(self) -> None:
+        """Coverage counts flow from disk scanning into machine-readable output."""
+        with tempfile.TemporaryDirectory() as repo_root:
+            with open(os.path.join(repo_root, "clean.py"), "w", encoding="utf-8") as handle:
+                handle.write("value = 1\n")
+            with open(os.path.join(repo_root, "binary.bin"), "wb") as handle:
+                handle.write(b"\x00binary")
+
+            output = StringIO()
+            with redirect_stdout(output):
+                with patch("secret_sentinel.cli.get_git_root", return_value=repo_root):
+                    result = main(
+                        [repo_root, "--coverage", "--no-ai", "--format", "json"]
+                    )
+
+        report = json.loads(output.getvalue())
+        self.assertEqual(result, 0)
+        self.assertEqual(report["coverage"]["scanned_files"], 1)
+        self.assertEqual(report["coverage"]["binary_files"], 1)
 
     def test_main_format_sarif(self) -> None:
         """Main with --format sarif should return exit code 0 when clean."""
