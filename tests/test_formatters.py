@@ -147,8 +147,25 @@ class TestFormatters(unittest.TestCase):
             data["issues"][0]["explanation"],
             "A built-in secret pattern matched.",
         )
+        self.assertEqual(data["issues"][0]["evidence"], "Built-in credential format")
+        self.assertIn("No source files are changed", data["issues"][0]["remediation_preview"])
+        self.assertIn("rule_pack_version", data)
         self.assertIn("Deactivate the access key in IAM", data["issues"][0]["remediation"][0])
         self.assertNotIn(DUMMY_AWS, raw_json)
+
+    def test_format_json_includes_coverage_counts(self) -> None:
+        """Coverage metadata is included when requested."""
+        coverage = {
+            "scanned_files": 2,
+            "ignored_paths": 1,
+            "binary_files": 1,
+            "unreadable_paths": 0,
+            "missing_paths": 0,
+        }
+
+        data = json.loads(format_json([], coverage=coverage))
+
+        self.assertEqual(data["coverage"], coverage)
 
     def test_format_json_sanitizes_unknown_detection_reason(self) -> None:
         """Unknown reason metadata should not leak into JSON reports."""
@@ -235,6 +252,15 @@ class TestFormatters(unittest.TestCase):
     def test_format_sarif_includes_baseline_suppressed_count(self) -> None:
         data = json.loads(format_sarif([], baseline_suppressed=2))
         self.assertEqual(data["runs"][0]["properties"]["baselineSuppressed"], 2)
+
+    def test_format_sarif_includes_rule_pack_and_coverage(self) -> None:
+        """SARIF run properties identify detector and scan coverage versions."""
+        coverage = {"scanned_files": 2}
+
+        data = json.loads(format_sarif([], coverage=coverage))
+
+        self.assertEqual(data["runs"][0]["properties"]["rulePackVersion"], "1")
+        self.assertEqual(data["runs"][0]["properties"]["coverage"], coverage)
 
     def test_format_suppression_audit_text_empty_and_findings(self) -> None:
         """Audit text should clearly report empty and review-needed results."""

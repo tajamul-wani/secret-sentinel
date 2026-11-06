@@ -4,6 +4,7 @@ These tests ensure that secrets, credentials, tokens, and sensitive system
 paths are never leaked in findings reports, history records, or error output.
 """
 
+import base64
 import json
 import tempfile
 import unittest
@@ -112,6 +113,29 @@ class TestSecurityAndLeakPrevention(unittest.TestCase):
                 serialized,
                 "Security failure: Raw secret found inside history record!",
             )
+
+    def test_multiline_and_encoded_findings_are_redacted(self) -> None:
+        """Reports must hide complete key blocks and their encoded credentials."""
+        private_key_material = "synthetic-private-key-material"
+        private_block = (
+            "-----BEGIN RSA PRIVATE KEY-----\n"
+            f"{private_key_material}\n"
+            "-----END RSA PRIVATE KEY-----"
+        )
+        encoded_token = base64.b64encode(DUMMY_GITHUB.encode()).decode()
+        issues = scan_text(
+            private_block + f'\ntoken = "{encoded_token}"\n',
+            "settings.py",
+        )
+
+        for report in (
+            summarize_issues(issues),
+            format_json(issues),
+            format_sarif(issues),
+        ):
+            self.assertNotIn(private_key_material, report)
+            self.assertNotIn(DUMMY_GITHUB, report)
+            self.assertNotIn(encoded_token, report)
 
     def test_mask_secret_is_complete(self) -> None:
         """Masked secret must not leak prefix, suffix, or partial key data."""
