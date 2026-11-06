@@ -111,3 +111,23 @@ _REMEDIATION: Dict[str, Tuple[str, ...]] = {
 def get_remediation(matcher: str) -> List[str]:
     """Return safe response steps for a detected matcher."""
     return list(_REMEDIATION.get(matcher, _DEFAULT_GUIDANCE))
+
+
+def get_remediation_preview(matcher: str) -> str:
+    """Return a secret-free, manual remediation preview for a finding."""
+    if matcher == "AWS Access Key ID":
+        return (
+            "Check for exposure of the matching secret access key; an access key "
+            "ID alone is not an authenticator. No source files are changed."
+        )
+    if matcher == "Private Key":
+        return (
+            "After replacing the key, remove the private-key block from source and "
+            "load key material through an approved key-management mechanism. "
+            "No source files are changed."
+        )
+    return (
+        "After rotation, replace the hardcoded value with a runtime lookup from an "
+        "environment variable or approved secrets manager. Adapt the lookup to "
+        "the source language and review it before applying. No source files are changed."
+    )
