@@ -195,8 +195,17 @@ on its own. A matching secret access key is required.
 
 The scanner uses known formats and heuristics. It can miss unfamiliar
 credentials and may flag harmless values. A small synthetic regression corpus
-checks common formats and framework settings; its results are not a measure of
-real-world accuracy. Run it with `python tests/test_detection_quality.py`.
+checks common formats, encoded provider tokens, complete private-key blocks,
+and benign lookalikes. CI reports finding-level precision and recall and guards
+them at 95% or higher. These synthetic results are regression checks, not a
+measure of real-world accuracy. The test corpus is versioned independently from
+the built-in rule pack; machine-readable reports include the rule-pack version.
+Run it with `python tests/test_detection_quality.py`.
+Confidence describes match strength, not whether a provider currently accepts
+the credential. Exact built-in format matches and complete private-key blocks
+are high confidence; generic assignments, custom rules, and encoded matches
+are medium confidence; a private-key header without a complete block is low
+confidence.
 Generic assignment checks skip obvious template values such as
 `YOUR_API_KEY_HERE` and `replace-with-token-from-vault`.
 
@@ -217,6 +226,11 @@ python -m scripts.benchmark_leaky_repo /path/to/leaky-repo \
 The report contains aggregate counts only. The benchmark labels provide counts
 per file, not exact finding locations, so the results do not establish
 precision or recall.
+
+Base64 values are decoded only when they appear in a secret-related field, and
+are reported only when the decoded content matches a built-in secret format.
+Complete PEM private-key blocks are reported as one finding at the header line;
+reports redact the full block.
 
 ### Responding to Findings
 
@@ -353,9 +367,22 @@ secret-sentinel . --format sarif --output results.sarif
 ```
 
 Text, JSON, and SARIF findings include a short explanation of the detection
-signal and its confidence where available. Entropy-based findings explain that
-high-entropy values were assigned to secret-related fields.
+signal, confidence, and a secret-free description of the evidence. Reports also
+include a remediation preview that suggests a manual next step; it never
+modifies source files. JSON and SARIF identify the built-in rule-pack version.
 Reported snippets remain redacted.
+
+For explicit disk-path scans, include coverage counts to see what the scanner
+examined and skipped:
+
+```bash
+secret-sentinel src/ --coverage
+secret-sentinel src/ --coverage --format json
+```
+
+Coverage reports scanned files and ignored, binary, unreadable, and missing
+paths. It is currently available only for explicit on-disk paths, not staged,
+diff, or Git-history scans.
 
 ### Inline Ignore Directives
 
