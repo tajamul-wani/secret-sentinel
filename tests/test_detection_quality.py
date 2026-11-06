@@ -1,5 +1,6 @@
 """Labeled synthetic cases for scanner precision and recall regressions."""
 
+import base64
 import sys
 import unittest
 from dataclasses import dataclass
@@ -8,7 +9,9 @@ from typing import List, Tuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from secret_sentinel.scanner import scan_text
+from secret_sentinel.scanner import RULE_PACK_VERSION, scan_text
+
+CORPUS_VERSION = 2
 
 
 @dataclass(frozen=True)
@@ -56,6 +59,7 @@ def build_cases() -> List[DetectionCase]:
         "eyJzdWIiOiIxMjM0NTY3ODkwIn0."
         "doNotLeakThisSignature123"
     )
+    encoded_github_token = base64.b64encode(github_token.encode()).decode()
 
     return [
         DetectionCase(
@@ -118,6 +122,12 @@ def build_cases() -> List[DetectionCase]:
             "GitHub Token",
         ),
         DetectionCase(
+            "Base64-encoded GitHub token in a secret field",
+            f'token = "{encoded_github_token}"',
+            True,
+            "GitHub Token",
+        ),
+        DetectionCase(
             "Slack bot token",
             f"SLACK_BOT_TOKEN={slack_token}",
             True,
@@ -132,6 +142,14 @@ def build_cases() -> List[DetectionCase]:
         DetectionCase(
             "Private key header",
             "-----BEGIN RSA PRIVATE KEY-----",
+            True,
+            "Private Key",
+        ),
+        DetectionCase(
+            "Complete private key block",
+            "-----BEGIN RSA PRIVATE KEY-----\n"
+            "synthetic-private-key-material\n"
+            "-----END RSA PRIVATE KEY-----",
             True,
             "Private Key",
         ),
@@ -314,6 +332,11 @@ def build_cases() -> List[DetectionCase]:
             False,
         ),
         DetectionCase(
+            "Encoded checksum",
+            f'checksum = "{encoded_github_token}"',
+            False,
+        ),
+        DetectionCase(
             "Release version identifier",
             'release = "2026.11.05-build.42"',
             False,
@@ -467,7 +490,7 @@ class TestDetectionQuality(unittest.TestCase):
         recall = true_positive / (true_positive + false_negative)
 
         print(
-            "Synthetic corpus: "
+            f"Synthetic corpus v{CORPUS_VERSION} (rule pack {RULE_PACK_VERSION}): "
             f"TP={true_positive}, FP={false_positive}, TN={true_negative}, "
             f"FN={false_negative}, precision={precision:.0%}, recall={recall:.0%}"
         )
@@ -535,6 +558,8 @@ class TestDetectionQuality(unittest.TestCase):
         self.assertEqual(incorrect_severity, [])
         self.assertEqual(false_positive, 0, false_positive_cases)
         self.assertEqual(false_negative, 0, false_negative_cases)
+        self.assertGreaterEqual(precision, 0.95)
+        self.assertGreaterEqual(recall, 0.95)
 
 
 if __name__ == "__main__":
