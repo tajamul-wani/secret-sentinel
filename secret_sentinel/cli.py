@@ -23,6 +23,7 @@ from .formatters import (
 from .history import ScanHistory
 from .risk_scoring import SeverityLevel, calculate_overall_severity
 from .scanner import (
+    ScanCoverage,
     audit_suppressions_in_repo,
     get_git_root,
     get_staged_content,
@@ -121,6 +122,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-ai",
         action="store_true",
         help="Skip AI context validation and rely on local regex/entropy scanning only.",
+    )
+    parser.add_argument(
+        "--coverage",
+        action="store_true",
+        help="Report scanned and skipped paths for an explicit on-disk path scan.",
     )
     parser.add_argument(
         "--install-hook",
@@ -739,6 +745,7 @@ def scan_paths(
     debug: bool = False,
     custom_rules: Optional[List[CustomRule]] = None,
     diff_base: Optional[str] = None,
+    coverage: Optional[ScanCoverage] = None,
 ) -> List[Dict[str, Any]]:
     """Execute secret scan across paths or staged changes, optionally applying AI validation.
 
@@ -782,6 +789,7 @@ def scan_paths(
             ignore_globs=ignore_globs,
             repo_root=repo_root,
             custom_rules=active_custom_rules,
+            coverage=coverage,
         )
 
     if no_ai or not config.ai_enabled or not issues:
@@ -835,6 +843,31 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     if args.yes and not args.init:
         logger.error("--yes can only be used with --init.")
+        return 2
+    if args.coverage and (
+        not args.paths
+        or args.staged
+        or args.git_history
+        or args.diff is not None
+        or args.commit_range is not None
+        or args.all_refs
+        or args.baseline
+        or args.update_baseline
+        or args.history
+        or args.stats
+        or args.clear_history
+        or args.audit_suppressions
+        or args.doctor
+        or args.setup
+        or args.init
+        or args.yes
+        or args.install_hook
+        or args.uninstall_hook
+        or args.install_pre_push_hook
+        or args.uninstall_pre_push_hook
+        or args.pre_push
+    ):
+        logger.error("--coverage requires an explicit on-disk path scan.")
         return 2
 
     if args.pre_push:
@@ -1139,6 +1172,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         logger.error("--update-baseline cannot be combined with --format or --output.")
         return 2
 
+    coverage = ScanCoverage() if args.coverage else None
     if args.git_history:
         try:
             issues = scan_git_history(
@@ -1182,6 +1216,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             staged=args.staged,
             debug=args.debug,
             custom_rules=config.custom_rules,
+            coverage=coverage,
         )
 
     if args.update_baseline:
@@ -1232,15 +1267,24 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     if args.format == "json":
         output_str = format_json(
-            issues, fail_on=threshold, baseline_suppressed=baseline_suppressed
+            issues,
+            fail_on=threshold,
+            baseline_suppressed=baseline_suppressed,
+            coverage=coverage.as_dict() if coverage is not None else None,
         )
     elif args.format == "sarif":
         output_str = format_sarif(
-            issues, repo_root=repo_root, baseline_suppressed=baseline_suppressed
+            issues,
+            repo_root=repo_root,
+            baseline_suppressed=baseline_suppressed,
+            coverage=coverage.as_dict() if coverage is not None else None,
         )
     else:
         output_str = format_text(
-            issues, fail_on=threshold, baseline_suppressed=baseline_suppressed
+            issues,
+            fail_on=threshold,
+            baseline_suppressed=baseline_suppressed,
+            coverage=coverage.as_dict() if coverage is not None else None,
         )
 
     if args.output:
