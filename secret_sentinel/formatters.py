@@ -3,17 +3,30 @@
 import json
 from typing import Any, Dict, List, Optional
 
-from .remediation import get_remediation
+from .remediation import get_remediation, get_remediation_preview
 from .risk_scoring import SeverityLevel, calculate_overall_severity, get_issue_severity
+from .scanner import RULE_PACK_VERSION
 from .utils import sanitize_snippet
 
 
 _DETECTION_EXPLANATIONS = {
     "pattern": ("pattern", "A built-in secret pattern matched."),
     "custom-pattern": ("custom-pattern", "A configured custom rule matched."),
+    "encoded-pattern": (
+        "encoded-pattern",
+        "A decoded value matched a built-in secret pattern.",
+    ),
     "entropy": (
         "entropy",
         "A high-entropy string was assigned to a secret-related field.",
+    ),
+    "private-key-block": (
+        "private-key-block",
+        "A complete private-key block was found.",
+    ),
+    "private-key-header": (
+        "private-key-header",
+        "A private-key header was found without a complete block.",
     ),
 }
 _CONFIDENCE_LEVELS = {"high", "medium", "low"}
@@ -25,8 +38,33 @@ def _get_detection_details(issue: Dict[str, Any]) -> tuple[str, str]:
     if isinstance(reason, str):
         details = _DETECTION_EXPLANATIONS.get(reason)
         if details is not None:
+            if (
+                reason == "pattern"
+                and issue.get("matcher") == "Generic Secret Assignment"
+            ):
+                return (
+                    "pattern",
+                    "A non-placeholder value was assigned to a secret-related field.",
+                )
             return details
     return "unknown", "A configured detector identified a potential secret."
+
+
+def _get_evidence(issue: Dict[str, Any]) -> str:
+    """Return a static explanation of the signal without exposing the value."""
+    reason = issue.get("reason")
+    if reason == "pattern":
+        if issue.get("matcher") == "Generic Secret Assignment":
+            return "Credential-like field assignment"
+        return "Built-in credential format"
+    evidence = {
+        "custom-pattern": "Configured regular-expression rule",
+        "encoded-pattern": "Base64-decoded credential format",
+        "entropy": "High entropy in a secret-related field",
+        "private-key-block": "Complete private-key block",
+        "private-key-header": "Private-key header only",
+    }
+    return evidence.get(str(reason), "Unspecified detector signal")
 
 
 def _get_confidence(issue: Dict[str, Any]) -> str:
@@ -41,6 +79,7 @@ def format_text(
     issues: List[Dict[str, Any]],
     fail_on: Optional[SeverityLevel] = None,
     baseline_suppressed: int = 0,
+    coverage: Optional[Dict[str, int]] = None,
 ) -> str:
     """Format scan issues into human-readable text.
 
@@ -55,6 +94,8 @@ def format_text(
         message = "All clear! No potential secrets found."
         if baseline_suppressed:
             message += f" ({baseline_suppressed} baseline finding(s) ignored)."
+        if coverage is not None:
+            message += "\n" + _format_coverage(coverage)
         return message
 
     severity_counts = {severity: 0 for severity in SeverityLevel}
@@ -103,6 +144,11 @@ def format_text(
             f"  Why flagged: {explanation} "
             f"Confidence: {_get_confidence(issue)}."
         )
+        lines.append(f"  Evidence: {_get_evidence(issue)}.")
+        lines.append(
+            "  Suggested fix: "
+            + get_remediation_preview(str(issue.get("matcher", "")))
+        )
         lines.extend(
             f"  Remediation: {step}"
             for step in get_remediation(str(issue.get("matcher", "")))
@@ -121,13 +167,28 @@ def format_text(
         lines.append(
             f"Scan passed with warnings: detected issues are below failure threshold ({threshold.name})."
         )
+    if coverage is not None:
+        lines.append(_format_coverage(coverage))
     return "\n".join(lines)
+
+
+def _format_coverage(coverage: Dict[str, int]) -> str:
+    """Format a scan coverage summary."""
+    return (
+        "Coverage: "
+        f"{coverage.get('scanned_files', 0)} scanned, "
+        f"{coverage.get('ignored_paths', 0)} ignored, "
+        f"{coverage.get('binary_files', 0)} binary, "
+        f"{coverage.get('unreadable_paths', 0)} unreadable, "
+        f"{coverage.get('missing_paths', 0)} missing."
+    )
 
 
 def format_json(
     issues: List[Dict[str, Any]],
     fail_on: Optional[SeverityLevel] = None,
     baseline_suppressed: int = 0,
+    coverage: Optional[Dict[str, int]] = None,
 ) -> str:
     """Format scan issues into machine-readable JSON without leaking credentials.
 
@@ -154,6 +215,7 @@ def format_json(
         secret_val = str(issue.get("value", ""))
         safe_snippet = sanitize_snippet(raw_snippet, secret_val)
         reason, explanation = _get_detection_details(issue)
+        evidence = _get_evidence(issue)
 
         item = {
             "source": issue.get("source"),
@@ -164,12 +226,16 @@ def format_json(
             "severity": issue.get("severity"),
             "reason": reason,
             "explanation": explanation,
+            "evidence": evidence,
         }
         if issue.get("entropy") is not None:
             item["entropy"] = issue.get("entropy")
         if issue.get("commit"):
             item["commit"] = issue.get("commit")
         item["remediation"] = get_remediation(str(issue.get("matcher", "")))
+        item["remediation_preview"] = get_remediation_preview(
+            str(issue.get("matcher", ""))
+        )
         sanitized_issues.append(item)
 
     report = {
@@ -178,8 +244,11 @@ def format_json(
         "overall_severity": overall_severity.name,
         "fail_on": threshold.name,
         "baseline_suppressed": baseline_suppressed,
+        "rule_pack_version": RULE_PACK_VERSION,
         "issues": sanitized_issues,
     }
+    if coverage is not None:
+        report["coverage"] = coverage
     return json.dumps(report, indent=2)
 
 
@@ -187,6 +256,7 @@ def format_sarif(
     issues: List[Dict[str, Any]],
     repo_root: Optional[str] = None,
     baseline_suppressed: int = 0,
+    coverage: Optional[Dict[str, int]] = None,
 ) -> str:
     """Format scan issues into SARIF v2.1.0 format for GitHub Code Scanning.
 
@@ -222,6 +292,7 @@ def format_sarif(
         safe_snippet = sanitize_snippet(raw_snippet, secret_val)
         reason, explanation = _get_detection_details(issue)
         confidence = _get_confidence(issue)
+        evidence = _get_evidence(issue)
 
         result = {
             "ruleId": rule_id,
@@ -250,6 +321,9 @@ def format_sarif(
             "confidence": confidence,
             "reason": reason,
             "explanation": explanation,
+            "evidence": evidence,
+            "remediationPreview": get_remediation_preview(rule_id),
+            "rulePackVersion": RULE_PACK_VERSION,
         }
         if issue.get("commit"):
             result["properties"]["commit"] = issue["commit"]
@@ -273,10 +347,12 @@ def format_sarif(
             }
         ]
     }
+    run_properties: Dict[str, Any] = {"rulePackVersion": RULE_PACK_VERSION}
     if baseline_suppressed:
-        sarif_log["runs"][0]["properties"] = {
-            "baselineSuppressed": baseline_suppressed
-        }
+        run_properties["baselineSuppressed"] = baseline_suppressed
+    if coverage is not None:
+        run_properties["coverage"] = coverage
+    sarif_log["runs"][0]["properties"] = run_properties
     return json.dumps(sarif_log, indent=2)
 
 
