@@ -222,6 +222,13 @@ def _normalize_path(path: str) -> str:
     return path.replace("\\", "/")
 
 
+def _has_symlink_component(path: str) -> bool:
+    """Return whether resolving the path would traverse a symbolic link."""
+    return os.path.normcase(os.path.realpath(path)) != os.path.normcase(
+        os.path.abspath(path)
+    )
+
+
 def _sanitize_source_path(path: str, repo_root: Optional[str] = None) -> str:
     """Convert absolute paths to repo-relative paths to avoid leaking system paths.
 
@@ -1104,14 +1111,20 @@ def scan_paths(
         List of issue findings.
     """
     issues = []
-    active_ignores = ignore_globs or DEFAULT_IGNORE
+    active_ignores = DEFAULT_IGNORE if ignore_globs is None else ignore_globs
     for path in paths:
+        if _has_symlink_component(path):
+            if coverage is not None:
+                coverage.ignored_paths += 1
+            continue
         if os.path.isdir(path):
             def record_walk_error(_: OSError) -> None:
                 if coverage is not None:
                     coverage.unreadable_paths += 1
 
             for root, dirs, files in os.walk(path, onerror=record_walk_error):
+                dirs.sort()
+                files.sort()
                 if _is_ignored(root, active_ignores, repo_root):
                     if coverage is not None:
                         coverage.ignored_paths += 1
@@ -1122,8 +1135,24 @@ def scan_paths(
                         coverage.ignored_paths += 1
                     dirs[:] = []
                     continue
+                symlink_dirs = [
+                    directory
+                    for directory in dirs
+                    if os.path.islink(os.path.join(root, directory))
+                ]
+                if coverage is not None:
+                    coverage.ignored_paths += len(symlink_dirs)
+                dirs[:] = [
+                    directory
+                    for directory in dirs
+                    if directory not in symlink_dirs
+                ]
                 for file_name in files:
                     full_path = os.path.join(root, file_name)
+                    if os.path.islink(full_path):
+                        if coverage is not None:
+                            coverage.ignored_paths += 1
+                        continue
                     if _is_ignored(full_path, active_ignores, repo_root):
                         if coverage is not None:
                             coverage.ignored_paths += 1

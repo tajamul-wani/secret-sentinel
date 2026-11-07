@@ -918,6 +918,75 @@ class TestScanner(unittest.TestCase):
             nonexistent = scan_paths([os.path.join(tmpdir, "missing.py")])
             self.assertEqual(len(nonexistent), 0)
 
+    def test_scan_paths_honors_explicit_empty_ignore_list(self) -> None:
+        """An empty ignore list disables built-in path exclusions."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target_dir = os.path.join(tmpdir, "node_modules")
+            os.makedirs(target_dir)
+            target_file = os.path.join(target_dir, "app.py")
+            with open(target_file, "w", encoding="utf-8") as handle:
+                handle.write(f'api_key = "{DUMMY_AWS}"\n')
+
+            issues = scan_paths([tmpdir], ignore_globs=[])
+
+        self.assertTrue(
+            any(issue["source"].endswith("node_modules/app.py") for issue in issues)
+        )
+
+    def test_scan_paths_skips_symlinks_and_reports_coverage(self) -> None:
+        """Disk scans do not read symlink targets inside or outside the scan root."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo_root = os.path.join(tmpdir, "repo")
+            os.mkdir(repo_root)
+            target = os.path.join(tmpdir, "outside.py")
+            with open(target, "w", encoding="utf-8") as handle:
+                handle.write(f'api_key = "{DUMMY_AWS}"\n')
+            os.symlink(target, os.path.join(repo_root, "file-link.py"))
+            os.symlink(tmpdir, os.path.join(repo_root, "directory-link"))
+            direct_link = os.path.join(tmpdir, "direct-link.py")
+            os.symlink(target, direct_link)
+            nested_link_target = os.path.join(
+                repo_root,
+                "directory-link",
+                os.path.basename(target),
+            )
+            coverage = ScanCoverage()
+
+            issues = scan_paths([repo_root], coverage=coverage)
+            direct_link_issues = scan_paths([direct_link], coverage=coverage)
+            nested_link_issues = scan_paths([nested_link_target], coverage=coverage)
+
+        self.assertEqual(issues, [])
+        self.assertEqual(direct_link_issues, [])
+        self.assertEqual(nested_link_issues, [])
+        self.assertEqual(coverage.ignored_paths, 4)
+
+    def test_scan_paths_reports_unreadable_files_in_coverage(self) -> None:
+        """Read failures are counted instead of treated as scanned clean files."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = os.path.join(tmpdir, "unreadable.py")
+            with open(target, "w", encoding="utf-8") as handle:
+                handle.write("value = 1\n")
+            coverage = ScanCoverage()
+            with patch("builtins.open", side_effect=PermissionError):
+                issues = scan_paths([target], coverage=coverage)
+
+        self.assertEqual(issues, [])
+        self.assertEqual(coverage.unreadable_paths, 1)
+
+    def test_scan_paths_returns_findings_in_stable_path_order(self) -> None:
+        """Directory traversal emits findings in lexicographic path order."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            for name in ("z-last.py", "a-first.py"):
+                with open(os.path.join(tmpdir, name), "w", encoding="utf-8") as handle:
+                    handle.write(f'api_key = "{DUMMY_AWS}"\n')
+
+            issues = scan_paths([tmpdir])
+
+        sources = [os.path.basename(issue["source"]) for issue in issues]
+        self.assertEqual(sources, sorted(sources))
+        self.assertEqual(set(sources), {"a-first.py", "z-last.py"})
+
     def test_scan_paths_reports_coverage_counts(self) -> None:
         """Coverage distinguishes scanned, ignored, binary, and missing paths."""
         with tempfile.TemporaryDirectory() as tmpdir:
