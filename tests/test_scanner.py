@@ -915,6 +915,47 @@ class TestScanner(unittest.TestCase):
                 )
                 self.assertEqual(issues[0]["source"], "app.py")
 
+    def test_staged_paths_support_unusual_names_and_renames(self) -> None:
+        """Staged scanning handles newlines, pathspec syntax, and renamed files."""
+        with tempfile.TemporaryDirectory() as repo_root:
+            self._initialize_history_repo(repo_root)
+            self._commit_file(
+                repo_root,
+                "rename-source.py",
+                f'api_key = "{DUMMY_AWS}"\n'.encode(),
+            )
+            self._run_git(repo_root, "mv", "rename-source.py", "rename-target.py")
+            unusual_paths = ["line\nbreak.py", ":(exclude)literal.py"]
+            for path in unusual_paths:
+                full_path = os.path.join(repo_root, path)
+                with open(full_path, "w", encoding="utf-8") as handle:
+                    handle.write(f'api_key = "{DUMMY_AWS}"\n')
+            self._run_git(
+                repo_root,
+                "--literal-pathspecs",
+                "add",
+                "--",
+                *unusual_paths,
+            )
+
+            staged_paths = get_staged_paths(repo_root)
+            issues = scan_staged_files(repo_root=repo_root)
+
+        self.assertEqual(set(staged_paths), {"rename-target.py", *unusual_paths})
+        self.assertEqual(
+            {issue["source"] for issue in issues},
+            {"rename-target.py", *unusual_paths},
+        )
+
+    def test_staged_git_failures_raise_instead_of_looking_clean(self) -> None:
+        """Git failures cannot be mistaken for an empty staged scan."""
+        failed = subprocess.CompletedProcess(
+            args=["git", "diff"], returncode=128, stdout=b"", stderr=b""
+        )
+        with patch("secret_sentinel.scanner._run_git_command", return_value=failed):
+            with self.assertRaisesRegex(RuntimeError, "Unable to read staged files"):
+                get_staged_paths()
+
     def test_scan_staged_files_applies_custom_rules(self) -> None:
         rule = CustomRule(
             name="Company API Token",
@@ -947,17 +988,22 @@ class TestScanner(unittest.TestCase):
             mock_git.return_value = MagicMock(returncode=1, stdout="")
             self.assertIsNone(get_git_root())
 
-            mock_git.return_value = MagicMock(returncode=0, stdout="file1.py\nfile2.py\n")
+            mock_git.return_value = MagicMock(
+                returncode=0,
+                stdout=b"file1.py\0file2.py\0",
+            )
             self.assertEqual(get_staged_paths(), ["file1.py", "file2.py"])
 
             mock_git.return_value = MagicMock(returncode=1, stdout="")
-            self.assertEqual(get_staged_paths(), [])
+            with self.assertRaisesRegex(RuntimeError, "Unable to read staged files"):
+                get_staged_paths()
 
             mock_git.return_value = MagicMock(returncode=0, stdout=b"content")
             self.assertEqual(get_staged_content("file1.py"), "content")
 
             mock_git.return_value = MagicMock(returncode=1, stdout=b"")
-            self.assertIsNone(get_staged_content("file1.py"))
+            with self.assertRaisesRegex(RuntimeError, "Unable to read staged file"):
+                get_staged_content("file1.py")
 
 
 if __name__ == "__main__":

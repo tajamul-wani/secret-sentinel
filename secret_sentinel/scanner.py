@@ -155,36 +155,59 @@ def get_git_root() -> Optional[str]:
     return result.stdout.strip()
 
 
-def get_staged_paths() -> List[str]:
-    """List file paths currently staged in Git index (Added, Copied, Modified).
+def get_staged_paths(repo_root: Optional[str] = None) -> List[str]:
+    """List paths for staged files whose contents can be scanned.
+
+    Args:
+        repo_root: Optional working directory for the Git command.
 
     Returns:
         List of relative paths to staged files.
     """
-    result = _run_git_command(["diff", "--cached", "--name-only", "--diff-filter=ACM"])
+    result = _run_git_command(
+        [
+            "diff",
+            "--cached",
+            "--name-only",
+            "-z",
+            "--diff-filter=ACMRT",
+            "--",
+        ],
+        cwd=repo_root,
+        text=False,
+    )
     if result.returncode != 0:
-        return []
-    return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+        raise RuntimeError("Unable to read staged files for scanning.")
+    return [
+        os.fsdecode(raw_path)
+        for raw_path in result.stdout.split(b"\0")
+        if raw_path
+    ]
 
 
-def get_staged_content(path: str) -> Optional[str]:
+def get_staged_content(path: str, repo_root: Optional[str] = None) -> Optional[str]:
     """Fetch text content of a staged file from the Git index.
 
     Args:
         path: Path of the file in the Git index.
+        repo_root: Optional working directory for the Git command.
 
     Returns:
-        Text content if file is plain text, or None if binary or unreadable.
+        Text content if file is plain text, or None if binary.
+
+    Raises:
+        RuntimeError: If Git cannot read the staged file.
     """
-    result = _run_git_command(["show", f":{path}"], text=False)
+    result = _run_git_command(
+        ["--literal-pathspecs", "show", f":0:{path}"],
+        cwd=repo_root,
+        text=False,
+    )
     if result.returncode != 0:
+        raise RuntimeError("Unable to read staged file content.")
+    if not is_text_bytes(result.stdout):
         return None
-    data = result.stdout if isinstance(result.stdout, str) else result.stdout
-    if isinstance(data, bytes):
-        if not is_text_bytes(data):
-            return None
-        return data.decode("utf-8", errors="replace")
-    return data
+    return result.stdout.decode("utf-8", errors="replace")
 
 
 def _normalize_path(path: str) -> str:
@@ -670,15 +693,16 @@ def scan_staged_files(
         List of issue findings across all staged files.
     """
     issues = []
-    active_ignores = ignore_globs or DEFAULT_IGNORE
-    for path in get_staged_paths():
-        absolute_path = os.path.join(repo_root or os.getcwd(), path)
-        if _is_ignored(absolute_path, active_ignores, repo_root):
+    effective_repo_root = repo_root or get_git_root()
+    active_ignores = DEFAULT_IGNORE if ignore_globs is None else ignore_globs
+    for path in get_staged_paths(effective_repo_root):
+        absolute_path = os.path.join(effective_repo_root or os.getcwd(), path)
+        if _is_ignored(absolute_path, active_ignores, effective_repo_root):
             continue
-        content = get_staged_content(path)
+        content = get_staged_content(path, effective_repo_root)
         if content is None:
             continue
-        safe_path = _sanitize_source_path(path, repo_root)
+        safe_path = _sanitize_source_path(path, effective_repo_root)
         issues.extend(scan_text(content, safe_path, custom_rules=custom_rules))
     return issues
 

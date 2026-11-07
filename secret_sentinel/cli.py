@@ -803,7 +803,7 @@ def scan_paths(
     for source_path, path_issues in issues_by_source.items():
         content: Optional[str] = None
         if staged or (not paths and diff_base is None):
-            content = get_staged_content(source_path)
+            content = get_staged_content(source_path, repo_root)
         if content is None:
             disk_path = Path(repo_root) / source_path if not os.path.isabs(source_path) else Path(source_path)
             try:
@@ -1210,16 +1210,26 @@ def main(argv: Optional[List[str]] = None) -> int:
             logger.error("Diff scan failed: %s", exc)
             return 1
     else:
-        issues = scan_paths(
-            args.paths,
-            args.no_ai,
-            staged=args.staged,
-            debug=args.debug,
-            custom_rules=config.custom_rules,
-            coverage=coverage,
-        )
+        try:
+            issues = scan_paths(
+                args.paths,
+                args.no_ai,
+                staged=args.staged,
+                debug=args.debug,
+                custom_rules=config.custom_rules,
+                coverage=coverage,
+            )
+        except (OSError, configparser.Error, RuntimeError, ValueError):
+            logger.error("Scan failed; requested files could not be checked.")
+            return 1
 
+    scan_incomplete = bool(coverage.unreadable_paths or coverage.missing_paths)
     if args.update_baseline:
+        if scan_incomplete:
+            logger.error(
+                "Baseline not updated; the scan did not check every requested path."
+            )
+            return 1
         try:
             baseline = ScanBaseline(repo_root)
             baseline.save(issues)
