@@ -91,7 +91,15 @@ def format_text(
         Formatted summary string.
     """
     if not issues:
-        message = "All clear! No potential secrets found."
+        incomplete = coverage is not None and (
+            coverage.get("unreadable_paths", 0) > 0
+            or coverage.get("missing_paths", 0) > 0
+        )
+        message = (
+            "Scan incomplete. No potential secrets were found in readable files."
+            if incomplete
+            else "All clear! No potential secrets found."
+        )
         if baseline_suppressed:
             message += f" ({baseline_suppressed} baseline finding(s) ignored)."
         if coverage is not None:
@@ -163,10 +171,18 @@ def format_text(
     threshold = fail_on or SeverityLevel.LOW
     if overall_severity.value >= threshold.value:
         lines.append("Commit blocked: secret-sentinel detected potential hardcoded secrets.")
-    else:
+    elif coverage is None or not (
+        coverage.get("unreadable_paths", 0)
+        or coverage.get("missing_paths", 0)
+    ):
         lines.append(
             f"Scan passed with warnings: detected issues are below failure threshold ({threshold.name})."
         )
+    if coverage is not None and (
+        coverage.get("unreadable_paths", 0)
+        or coverage.get("missing_paths", 0)
+    ):
+        lines.append("Scan incomplete: some requested paths could not be checked.")
     if coverage is not None:
         lines.append(_format_coverage(coverage))
     return "\n".join(lines)
@@ -202,7 +218,13 @@ def format_json(
     overall_severity = calculate_overall_severity(issues)
     threshold = fail_on or SeverityLevel.LOW
 
-    if not issues:
+    incomplete = coverage is not None and (
+        coverage.get("unreadable_paths", 0)
+        or coverage.get("missing_paths", 0)
+    )
+    if incomplete:
+        status = "incomplete"
+    elif not issues:
         status = "passed"
     elif overall_severity.value >= threshold.value:
         status = "blocked"
@@ -249,6 +271,10 @@ def format_json(
     }
     if coverage is not None:
         report["coverage"] = coverage
+        report["scan_complete"] = not (
+            coverage.get("unreadable_paths", 0)
+            or coverage.get("missing_paths", 0)
+        )
     return json.dumps(report, indent=2)
 
 
@@ -352,6 +378,10 @@ def format_sarif(
         run_properties["baselineSuppressed"] = baseline_suppressed
     if coverage is not None:
         run_properties["coverage"] = coverage
+        run_properties["scanComplete"] = not (
+            coverage.get("unreadable_paths", 0)
+            or coverage.get("missing_paths", 0)
+        )
     sarif_log["runs"][0]["properties"] = run_properties
     return json.dumps(sarif_log, indent=2)
 

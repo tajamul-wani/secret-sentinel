@@ -164,8 +164,38 @@ class TestFormatters(unittest.TestCase):
         }
 
         data = json.loads(format_json([], coverage=coverage))
-
         self.assertEqual(data["coverage"], coverage)
+        self.assertTrue(data["scan_complete"])
+
+    def test_formatters_mark_incomplete_scans(self) -> None:
+        """Reports distinguish skipped unreadable or missing paths from clean scans."""
+        coverage = {
+            "scanned_files": 0,
+            "ignored_paths": 0,
+            "binary_files": 0,
+            "unreadable_paths": 1,
+            "missing_paths": 0,
+        }
+
+        text = format_text([], coverage=coverage)
+        json_report = json.loads(format_json([], coverage=coverage))
+        sarif_report = json.loads(format_sarif([], coverage=coverage))
+
+        self.assertIn("Scan incomplete", text)
+        self.assertFalse(json_report["scan_complete"])
+        self.assertEqual(json_report["status"], "incomplete")
+        self.assertFalse(sarif_report["runs"][0]["properties"]["scanComplete"])
+
+        text_with_findings = format_text(
+            [self.sample_issues[0]],
+            coverage=coverage,
+        )
+        json_with_findings = json.loads(
+            format_json([self.sample_issues[0]], coverage=coverage)
+        )
+        self.assertIn("Scan incomplete", text_with_findings)
+        self.assertNotIn("Scan passed with warnings", text_with_findings)
+        self.assertEqual(json_with_findings["status"], "incomplete")
 
     def test_format_json_sanitizes_unknown_detection_reason(self) -> None:
         """Unknown reason metadata should not leak into JSON reports."""

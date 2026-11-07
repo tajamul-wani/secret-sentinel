@@ -381,8 +381,10 @@ secret-sentinel src/ --coverage --format json
 ```
 
 Coverage reports scanned files and ignored, binary, unreadable, and missing
-paths. It is currently available only for explicit on-disk paths, not staged,
-diff, or Git-history scans.
+paths. A scan that encounters a missing or unreadable path exits unsuccessfully
+and marks the report as incomplete. Disk scans skip symbolic links rather than
+reading their targets. Coverage is currently available only for explicit
+on-disk paths, not staged, diff, or Git-history scans.
 
 ### Inline Ignore Directives
 

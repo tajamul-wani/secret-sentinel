@@ -1172,7 +1172,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         logger.error("--update-baseline cannot be combined with --format or --output.")
         return 2
 
-    coverage = ScanCoverage() if args.coverage else None
+    coverage = ScanCoverage()
     if args.git_history:
         try:
             issues = scan_git_history(
@@ -1280,21 +1280,33 @@ def main(argv: Optional[List[str]] = None) -> int:
             issues,
             fail_on=threshold,
             baseline_suppressed=baseline_suppressed,
-            coverage=coverage.as_dict() if coverage is not None else None,
+            coverage=(
+                coverage.as_dict()
+                if args.coverage or scan_incomplete
+                else None
+            ),
         )
     elif args.format == "sarif":
         output_str = format_sarif(
             issues,
             repo_root=repo_root,
             baseline_suppressed=baseline_suppressed,
-            coverage=coverage.as_dict() if coverage is not None else None,
+            coverage=(
+                coverage.as_dict()
+                if args.coverage or scan_incomplete
+                else None
+            ),
         )
     else:
         output_str = format_text(
             issues,
             fail_on=threshold,
             baseline_suppressed=baseline_suppressed,
-            coverage=coverage.as_dict() if coverage is not None else None,
+            coverage=(
+                coverage.as_dict()
+                if args.coverage or scan_incomplete
+                else None
+            ),
         )
 
     if args.output:
@@ -1307,7 +1319,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     else:
         print(output_str)
 
-    return 1 if should_block else 0
+    return 1 if should_block or scan_incomplete else 0
 
 
 if __name__ == "__main__":
