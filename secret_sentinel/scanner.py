@@ -235,7 +235,7 @@ def _sanitize_source_path(path: str, repo_root: Optional[str] = None) -> str:
     if repo_root:
         try:
             rel = os.path.relpath(path, repo_root)
-            if not rel.startswith(".."):
+            if rel != os.pardir and not rel.startswith(os.pardir + os.sep):
                 return _normalize_path(rel)
         except ValueError:
             pass

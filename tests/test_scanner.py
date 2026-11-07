@@ -867,6 +867,16 @@ class TestScanner(unittest.TestCase):
         external_path = "/var/log/syslog"
         self.assertEqual(_sanitize_source_path(external_path, repo_root), "/var/log/syslog")
 
+    def test_sanitize_source_path_keeps_dot_prefix_names_relative(self) -> None:
+        """In-repository names beginning with dots remain relative."""
+        repo_root = "/home/user/project"
+        source = os.path.join(repo_root, "..private", "config.py")
+
+        self.assertEqual(
+            _sanitize_source_path(source, repo_root),
+            "..private/config.py",
+        )
+
     def test_normalize_path(self) -> None:
         """Path separators should be converted to forward slashes."""
         self.assertEqual(_normalize_path("folder\\sub\\file.py"), "folder/sub/file.py")
