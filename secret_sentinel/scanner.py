@@ -899,7 +899,7 @@ def _scan_git_commits(
     excluded_findings: Optional[set[tuple[str, str, str]]] = None,
 ) -> List[Dict[str, Any]]:
     """Scan changed blobs in a parent-before-child commit sequence."""
-    active_ignores = ignore_globs or DEFAULT_IGNORE
+    active_ignores = DEFAULT_IGNORE if ignore_globs is None else ignore_globs
     seen_findings: set[tuple[str, str, str]] = set()
     issues: List[Dict[str, Any]] = []
 
@@ -972,7 +972,7 @@ def _scan_git_tree_paths(
     if tree_result.returncode != 0:
         raise RuntimeError("Unable to read repository history for scanning.")
 
-    active_ignores = ignore_globs or DEFAULT_IGNORE
+    active_ignores = DEFAULT_IGNORE if ignore_globs is None else ignore_globs
     issues: List[Dict[str, Any]] = []
     for entry in tree_result.stdout.split(b"\0"):
         if not entry:
@@ -1028,7 +1028,7 @@ def scan_git_diff(
     if paths_result.returncode != 0:
         raise RuntimeError("Unable to list changed files for diff scanning.")
 
-    active_ignores = ignore_globs or DEFAULT_IGNORE
+    active_ignores = DEFAULT_IGNORE if ignore_globs is None else ignore_globs
     issues: List[Dict[str, Any]] = []
     for raw_path in paths_result.stdout.split(b"\0"):
         if not raw_path:

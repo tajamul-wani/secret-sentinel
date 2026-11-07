@@ -199,6 +199,40 @@ class TestScanner(unittest.TestCase):
 
         self.assertEqual([issue["source"] for issue in issues], ["src/config.py"])
 
+    def test_git_scan_modes_honor_an_explicit_empty_ignore_list(self) -> None:
+        """Empty ignore lists consistently include default-excluded paths."""
+        with tempfile.TemporaryDirectory() as repo_root:
+            self._initialize_history_repo(repo_root)
+            self._commit_file(
+                repo_root,
+                "node_modules/initial.py",
+                f'api_key = "{DUMMY_AWS}"\n'.encode(),
+            )
+            base_commit = self._run_git(repo_root, "rev-parse", "HEAD")
+            staged_path = "node_modules/staged.py"
+            full_path = os.path.join(repo_root, staged_path)
+            with open(full_path, "w", encoding="utf-8") as handle:
+                handle.write(f'api_key = "{DUMMY_AWS}"\n')
+            self._run_git(repo_root, "add", "--", staged_path)
+
+            history_issues = scan_git_history(repo_root, ignore_globs=[])
+            staged_issues = scan_staged_files(
+                repo_root=repo_root,
+                ignore_globs=[],
+            )
+            diff_issues = scan_git_diff(
+                base_commit,
+                repo_root,
+                ignore_globs=[],
+            )
+
+        history_sources = {issue["source"] for issue in history_issues}
+        staged_sources = {issue["source"] for issue in staged_issues}
+        diff_sources = {issue["source"] for issue in diff_issues}
+        self.assertIn("node_modules/initial.py", history_sources)
+        self.assertIn("node_modules/staged.py", staged_sources)
+        self.assertIn("node_modules/staged.py", diff_sources)
+
     def test_scan_git_history_requires_repository_history(self) -> None:
         """History scan should report a clear error outside an initialized repo."""
         with tempfile.TemporaryDirectory() as repo_root:
