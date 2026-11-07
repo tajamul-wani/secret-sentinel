@@ -1272,7 +1272,11 @@ def main(argv: Optional[List[str]] = None) -> int:
             )
         )
     )
-    status = "blocked" if should_block else "completed"
+    status = (
+        "incomplete"
+        if scan_incomplete
+        else "blocked" if should_block else "completed"
+    )
     history_manager.record_scan(issues, scan_type=scan_type, status=status)
 
     if args.format == "json":

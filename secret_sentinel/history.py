@@ -40,7 +40,8 @@ class ScanHistory:
         Args:
             issues: List of detected issues.
             scan_type: Type of scan, such as 'staged', 'git-range', or 'pre-push'.
-            status: Status of the scan ('completed', 'blocked', 'error').
+            status: Scan status, such as 'completed', 'blocked', 'incomplete',
+                or 'error'.
         """
         self.ensure_directory()
 

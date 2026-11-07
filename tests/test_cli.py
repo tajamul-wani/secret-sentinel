@@ -1339,6 +1339,76 @@ class TestCLI(unittest.TestCase):
         self.assertEqual(report["coverage"]["scanned_files"], 1)
         self.assertEqual(report["coverage"]["binary_files"], 1)
 
+    def test_main_fails_incomplete_disk_scan_and_reports_coverage(self) -> None:
+        """Missing paths cannot produce a successful all-clear scan."""
+        with tempfile.TemporaryDirectory() as repo_root:
+            missing_path = os.path.join(repo_root, "missing.py")
+            output = StringIO()
+            with (
+                patch("secret_sentinel.cli.get_git_root", return_value=repo_root),
+                redirect_stdout(output),
+            ):
+                result = main([missing_path, "--no-ai"])
+            history_status = ScanHistory(repo_root).get_history()[0]["status"]
+
+        report = output.getvalue()
+        self.assertEqual(result, 1)
+        self.assertIn("Scan incomplete", report)
+        self.assertIn("1 missing", report)
+        self.assertNotIn("All clear!", report)
+        self.assertEqual(history_status, "incomplete")
+
+    def test_main_json_marks_incomplete_disk_scan(self) -> None:
+        """Machine-readable reports mark unread paths as incomplete."""
+        with tempfile.TemporaryDirectory() as repo_root:
+            missing_path = os.path.join(repo_root, "missing.py")
+            output = StringIO()
+            with (
+                patch("secret_sentinel.cli.get_git_root", return_value=repo_root),
+                redirect_stdout(output),
+            ):
+                result = main([missing_path, "--no-ai", "--format", "json"])
+
+        report = json.loads(output.getvalue())
+        self.assertEqual(result, 1)
+        self.assertFalse(report["scan_complete"])
+        self.assertEqual(report["coverage"]["missing_paths"], 1)
+
+    def test_main_reports_staged_scan_failures_without_details(self) -> None:
+        """Git index read failures return a visible nonzero scan result."""
+        output = StringIO()
+        with (
+            patch(
+                "secret_sentinel.cli.scan_paths",
+                side_effect=RuntimeError("index details"),
+            ),
+            redirect_stdout(output),
+        ):
+            result = main(["--staged", "--no-ai"])
+
+        self.assertEqual(result, 1)
+        self.assertIn("Scan failed", output.getvalue())
+        self.assertNotIn("index details", output.getvalue())
+
+    def test_main_does_not_update_baseline_for_incomplete_scan(self) -> None:
+        """Incomplete scans cannot establish a baseline that hides unchecked files."""
+        with tempfile.TemporaryDirectory() as repo_root:
+            missing_path = os.path.join(repo_root, "missing.py")
+            output = StringIO()
+            with (
+                patch("secret_sentinel.cli.get_git_root", return_value=repo_root),
+                redirect_stdout(output),
+            ):
+                result = main(
+                    [missing_path, "--no-ai", "--update-baseline"]
+                )
+
+            baseline_path = Path(repo_root) / ".secret-sentinel" / "baseline.json"
+            self.assertFalse(baseline_path.exists())
+
+        self.assertEqual(result, 1)
+        self.assertIn("Baseline not updated", output.getvalue())
+
     def test_main_format_sarif(self) -> None:
         """Main with --format sarif should return exit code 0 when clean."""
         with patch("secret_sentinel.cli.scan_paths", return_value=[]):
