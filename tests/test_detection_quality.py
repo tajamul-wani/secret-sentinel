@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from secret_sentinel.scanner import RULE_PACK_VERSION, scan_text
 
-CORPUS_VERSION = 3
+CORPUS_VERSION = 4
 
 
 @dataclass(frozen=True)
@@ -58,9 +58,16 @@ def build_cases() -> list[DetectionCase]:
     stripe_publishable_key = "pk_live_" + "123456789012345678901234"
     github_token = "ghp_" + "1234567890abcdefghijklmnopqrstuvwxyz"
     slack_token = "xoxb-" + "1234567890" + "-" + "abcdefghij"
+    slack_user_token = "xoxp-" + "abcdefghij" + "-" + "1234567890"
     twilio_key = "SK" + "1234567890abcdef" * 2
     database_password = "password" + "Example123"
     database_uri = "postgresql://app:" + database_password + "@db.example.com/app"
+    mysql_uri = (
+        "mysql://service:syntheticPassword123@db.example.test:3306/application"
+    )
+    redis_uri = (
+        "redis://default:synthetic%40Password%3A123@cache.example.test:6379/0"
+    )
     generic_token = "token_" + "0123456789abcdef01234567"
     openai_key = "sk-proj-" + "0123456789abcdefghijklmnopqrstuvwxyz"
     anthropic_key = "sk-ant-" + "0123456789abcdefghijklmnopqrstuvwxyz"
@@ -155,6 +162,12 @@ def build_cases() -> list[DetectionCase]:
             "Slack Token",
         ),
         DetectionCase(
+            "Slack user token",
+            f"SLACK_USER_TOKEN={slack_user_token}",
+            True,
+            "Slack Token",
+        ),
+        DetectionCase(
             "Twilio API key",
             f'twilio_key = "{twilio_key}"',
             True,
@@ -175,8 +188,28 @@ def build_cases() -> list[DetectionCase]:
             "Private Key",
         ),
         DetectionCase(
+            "Complete OpenSSH private key block",
+            "-----BEGIN OPENSSH PRIVATE KEY-----\n"
+            "synthetic-openssh-key-material\n"
+            "-----END OPENSSH PRIVATE KEY-----",
+            True,
+            "Private Key",
+        ),
+        DetectionCase(
             "Database connection URI",
             f'database = "{database_uri}"',
+            True,
+            "Database Connection URI",
+        ),
+        DetectionCase(
+            "MySQL connection URI",
+            f'database_url = "{mysql_uri}"',
+            True,
+            "Database Connection URI",
+        ),
+        DetectionCase(
+            "Redis connection URI with encoded password punctuation",
+            f'cache_url = "{redis_uri}"',
             True,
             "Database Connection URI",
         ),
@@ -330,6 +363,21 @@ def build_cases() -> list[DetectionCase]:
         DetectionCase(
             "Stripe publishable key",
             f'publishable_key = "{stripe_publishable_key}"',
+            False,
+        ),
+        DetectionCase(
+            "Short AWS access key lookalike",
+            'aws_key = "AKIA1234567890"',
+            False,
+        ),
+        DetectionCase(
+            "Short Slack token lookalike",
+            'slack_token = "xoxb-short"',
+            False,
+        ),
+        DetectionCase(
+            "Anthropic token prefix in documentation",
+            'example = "sk-ant-placeholder"',
             False,
         ),
         DetectionCase(

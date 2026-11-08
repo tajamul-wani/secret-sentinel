@@ -14,7 +14,7 @@ from .config import CustomRule
 from .utils import is_text_bytes, sanitize_snippet, shannon_entropy
 from .risk_scoring import get_risk_score
 
-RULE_PACK_VERSION = "1"
+RULE_PACK_VERSION = "2"
 
 SECRET_PATTERNS = {
     "AWS Access Key ID": re.compile(
