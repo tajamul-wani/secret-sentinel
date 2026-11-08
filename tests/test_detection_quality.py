@@ -3,15 +3,15 @@
 import base64
 import sys
 import unittest
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Tuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from secret_sentinel.scanner import RULE_PACK_VERSION, scan_text
 
-CORPUS_VERSION = 2
+CORPUS_VERSION = 3
 
 
 @dataclass(frozen=True)
@@ -25,7 +25,28 @@ class DetectionCase:
     source: str = ""
 
 
-def build_cases() -> List[DetectionCase]:
+@dataclass(frozen=True)
+class DetectionMetrics:
+    """Finding-level confusion counts for the corpus or one detector."""
+
+    true_positive: int = 0
+    false_positive: int = 0
+    false_negative: int = 0
+
+    @property
+    def precision(self) -> float | None:
+        """Return precision, or None when there are no predicted findings."""
+        predictions = self.true_positive + self.false_positive
+        return self.true_positive / predictions if predictions else None
+
+    @property
+    def recall(self) -> float | None:
+        """Return recall, or None when there are no expected findings."""
+        expected = self.true_positive + self.false_negative
+        return self.true_positive / expected if expected else None
+
+
+def build_cases() -> list[DetectionCase]:
     """Build labeled examples across common formats and benign lookalikes."""
     aws_access_key = "AKIA" + "1234567890ABCDEF"
     aws_temporary_key = "ASIA" + "1234567890ABCDEF"
@@ -458,20 +479,49 @@ def build_cases() -> List[DetectionCase]:
     ]
 
 
-def evaluate_cases(cases: List[DetectionCase]) -> Tuple[int, int, int, int]:
-    """Return true-positive, false-positive, true-negative, and false-negative."""
-    true_positive = false_positive = true_negative = false_negative = 0
+def evaluate_cases(
+    cases: list[DetectionCase],
+) -> tuple[DetectionMetrics, dict[str, DetectionMetrics]]:
+    """Return finding-level metrics overall and for each reported detector."""
+    overall_counts: Counter[str] = Counter()
+    detector_counts: dict[str, Counter[str]] = {}
     for case in cases:
-        detected = bool(scan_text(case.content, case.source or case.name))
-        if detected and case.should_detect:
-            true_positive += 1
-        elif detected:
-            false_positive += 1
-        elif case.should_detect:
-            false_negative += 1
-        else:
-            true_negative += 1
-    return true_positive, false_positive, true_negative, false_negative
+        expected = Counter(
+            {case.expected_matcher: 1}
+            if case.should_detect and case.expected_matcher
+            else {}
+        )
+        actual = Counter(
+            issue["matcher"]
+            for issue in scan_text(case.content, case.source or case.name)
+        )
+        for matcher in expected.keys() | actual.keys():
+            counts = detector_counts.setdefault(matcher, Counter())
+            true_positive = min(expected[matcher], actual[matcher])
+            false_positive = actual[matcher] - true_positive
+            false_negative = expected[matcher] - true_positive
+            for key, value in (
+                ("true_positive", true_positive),
+                ("false_positive", false_positive),
+                ("false_negative", false_negative),
+            ):
+                counts[key] += value
+                overall_counts[key] += value
+
+    overall = DetectionMetrics(
+        true_positive=overall_counts["true_positive"],
+        false_positive=overall_counts["false_positive"],
+        false_negative=overall_counts["false_negative"],
+    )
+    per_detector = {
+        matcher: DetectionMetrics(
+            true_positive=counts["true_positive"],
+            false_positive=counts["false_positive"],
+            false_negative=counts["false_negative"],
+        )
+        for matcher, counts in sorted(detector_counts.items())
+    }
+    return overall, per_detector
 
 
 class TestDetectionQuality(unittest.TestCase):
@@ -518,23 +568,58 @@ class TestDetectionQuality(unittest.TestCase):
             ["Anthropic API Key"],
         )
 
+    def test_metrics_are_finding_level_and_report_each_detector(self) -> None:
+        """Per-detector totals must account for every expected and actual match."""
+        cases = build_cases()
+        overall, per_detector = evaluate_cases(cases)
+
+        self.assertEqual(
+            overall.true_positive,
+            sum(case.should_detect for case in cases),
+        )
+        self.assertEqual(overall.false_positive, 0)
+        self.assertEqual(overall.false_negative, 0)
+        self.assertEqual(
+            sum(metrics.true_positive for metrics in per_detector.values()),
+            overall.true_positive,
+        )
+        self.assertTrue(
+            all(
+                metrics.precision == 1.0 and metrics.recall == 1.0
+                for metrics in per_detector.values()
+            )
+        )
+
     def test_synthetic_corpus_precision_and_recall(self) -> None:
         """Report corpus precision and recall and guard its current examples."""
         cases = build_cases()
-        (
-            true_positive,
-            false_positive,
-            true_negative,
-            false_negative,
-        ) = evaluate_cases(cases)
-        precision = true_positive / (true_positive + false_positive)
-        recall = true_positive / (true_positive + false_negative)
+        metrics, per_detector = evaluate_cases(cases)
+        precision = metrics.precision or 0.0
+        recall = metrics.recall or 0.0
 
         print(
             f"Synthetic corpus v{CORPUS_VERSION} (rule pack {RULE_PACK_VERSION}): "
-            f"TP={true_positive}, FP={false_positive}, TN={true_negative}, "
-            f"FN={false_negative}, precision={precision:.0%}, recall={recall:.0%}"
+            f"TP={metrics.true_positive}, FP={metrics.false_positive}, "
+            f"FN={metrics.false_negative}, precision={precision:.0%}, "
+            f"recall={recall:.0%}"
         )
+        for matcher, detector_metrics in per_detector.items():
+            detector_precision = (
+                f"{detector_metrics.precision:.0%}"
+                if detector_metrics.precision is not None
+                else "n/a"
+            )
+            detector_recall = (
+                f"{detector_metrics.recall:.0%}"
+                if detector_metrics.recall is not None
+                else "n/a"
+            )
+            print(
+                f"  {matcher}: TP={detector_metrics.true_positive}, "
+                f"FP={detector_metrics.false_positive}, "
+                f"FN={detector_metrics.false_negative}, "
+                f"precision={detector_precision}, recall={detector_recall}"
+            )
         unlabeled_cases = [
             case.name
             for case in cases
@@ -550,23 +635,6 @@ class TestDetectionQuality(unittest.TestCase):
                 for issue in scan_text(case.content, case.source or case.name)
             }
         ]
-        detector_cases = {
-            matcher: [
-                case
-                for case in cases
-                if case.expected_matcher == matcher
-            ]
-            for matcher in sorted(
-                {case.expected_matcher for case in cases if case.expected_matcher}
-            )
-        }
-        detector_metrics = ", ".join(
-            f"{matcher}="
-            f"{len(group) - sum(case.name in missing_matchers for case in group)}"
-            f"/{len(group)}"
-            for matcher, group in detector_cases.items()
-        )
-        print(f"Detector cases: {detector_metrics}")
         critical_matchers = {
             "Docker Registry Auth",
             "Netrc Password",
@@ -582,11 +650,20 @@ class TestDetectionQuality(unittest.TestCase):
                 for issue in scan_text(case.content, case.source or case.name)
             )
         ]
-        false_positive_cases = [
-            case.name
+        matcher_mismatches = [
+            f"{case.name}: expected "
+            f"{case.expected_matcher if case.should_detect else 'no finding'}, got "
+            f"{', '.join(issue['matcher'] for issue in scan_text(case.content, case.source or case.name)) or 'no finding'}"
             for case in cases
-            if not case.should_detect
-            and scan_text(case.content, case.source or case.name)
+            if Counter(
+                issue["matcher"]
+                for issue in scan_text(case.content, case.source or case.name)
+            )
+            != Counter(
+                {case.expected_matcher: 1}
+                if case.should_detect and case.expected_matcher
+                else {}
+            )
         ]
         false_negative_cases = [
             case.name
@@ -597,8 +674,8 @@ class TestDetectionQuality(unittest.TestCase):
         self.assertEqual(unlabeled_cases, [])
         self.assertEqual(missing_matchers, [])
         self.assertEqual(incorrect_severity, [])
-        self.assertEqual(false_positive, 0, false_positive_cases)
-        self.assertEqual(false_negative, 0, false_negative_cases)
+        self.assertEqual(metrics.false_positive, 0, matcher_mismatches)
+        self.assertEqual(metrics.false_negative, 0, false_negative_cases)
         self.assertGreaterEqual(precision, 0.95)
         self.assertGreaterEqual(recall, 0.95)
 
