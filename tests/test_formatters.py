@@ -12,6 +12,7 @@ from secret_sentinel.formatters import (
     format_text,
 )
 from secret_sentinel.risk_scoring import SeverityLevel
+from secret_sentinel.scanner import RULE_PACK_VERSION
 
 DUMMY_AWS = "AKIA" + "1234567890ABCDEF"
 
@@ -289,7 +290,10 @@ class TestFormatters(unittest.TestCase):
 
         data = json.loads(format_sarif([], coverage=coverage))
 
-        self.assertEqual(data["runs"][0]["properties"]["rulePackVersion"], "1")
+        self.assertEqual(
+            data["runs"][0]["properties"]["rulePackVersion"],
+            RULE_PACK_VERSION,
+        )
         self.assertEqual(data["runs"][0]["properties"]["coverage"], coverage)
 
     def test_format_suppression_audit_text_empty_and_findings(self) -> None:
