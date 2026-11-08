@@ -477,6 +477,47 @@ def evaluate_cases(cases: List[DetectionCase]) -> Tuple[int, int, int, int]:
 class TestDetectionQuality(unittest.TestCase):
     """Check that the scanner performs consistently on labeled synthetic cases."""
 
+    def test_specific_matches_are_not_reported_as_generic_assignments(self) -> None:
+        """A specific format match should not be duplicated by the generic rule."""
+        cases = build_cases()
+        overlapping_cases = [
+            case
+            for case in cases
+            if case.expected_matcher
+            in {
+                "Google API Key",
+                "Stripe API Key",
+                "GitHub Token",
+                "Slack Token",
+                "HuggingFace Token",
+                "PyPI API Token",
+                "NPM Access Token",
+            }
+        ]
+
+        for case in overlapping_cases:
+            with self.subTest(case=case.name):
+                matches = scan_text(case.content, case.source or case.name)
+                self.assertEqual(
+                    [issue["matcher"] for issue in matches],
+                    [case.expected_matcher],
+                )
+
+    def test_anthropic_key_is_not_misclassified_as_openai(self) -> None:
+        """Anthropic's shared key prefix must not trigger the OpenAI rule."""
+        case = next(
+            case
+            for case in build_cases()
+            if case.expected_matcher == "Anthropic API Key"
+        )
+
+        matches = scan_text(case.content, case.source or case.name)
+
+        self.assertEqual(
+            [issue["matcher"] for issue in matches],
+            ["Anthropic API Key"],
+        )
+
     def test_synthetic_corpus_precision_and_recall(self) -> None:
         """Report corpus precision and recall and guard its current examples."""
         cases = build_cases()

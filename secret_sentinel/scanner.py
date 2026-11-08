@@ -31,7 +31,9 @@ SECRET_PATTERNS = {
     "Twilio Secret Key": re.compile(r"\bSK[0-9a-fA-F]{32}\b"),
     "Private Key": re.compile(r"-----BEGIN (?:[A-Z0-9_-]+\s)?PRIVATE KEY-----"),
     "Database Connection URI": re.compile(r"(?i)\b(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis|amqp[s]?):\/\/[^\s:]+:([^\s@]+)@[^\s/:]+"),
-    "OpenAI API Key": re.compile(r"\bsk-(?:proj-|svcacct-|admin-)?[A-Za-z0-9_-]{32,}\b"),
+    "OpenAI API Key": re.compile(
+        r"\bsk-(?!ant-)(?:proj-|svcacct-|admin-)?[A-Za-z0-9_-]{32,}\b"
+    ),
     "Anthropic API Key": re.compile(r"\bsk-ant-[A-Za-z0-9_-]{32,}\b"),
     "HuggingFace Token": re.compile(r"\bhf_[A-Za-z0-9]{34}\b"),
     "PyPI API Token": re.compile(r"\bpypi-AgEIcHlwaS5vcmc[A-Za-z0-9_-]{50,}\b"),
@@ -359,8 +361,7 @@ def _scan_line(
         for match in pattern.finditer(line):
             value = match.group(1) if match.groups() else match.group(0)
             if name == "Generic Secret Assignment" and any(
-                issue["matcher"] == "Docker Registry Auth"
-                and issue["value"] == value
+                issue["value"] == value and issue["matcher"] != name
                 for issue in issues
             ):
                 continue
