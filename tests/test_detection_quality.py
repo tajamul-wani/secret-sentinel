@@ -82,6 +82,7 @@ def build_cases() -> list[DetectionCase]:
     legacy_secret = "aB3dE5gH7jK9mP2rS4vX6zC8"
     high_entropy_value = "K9zXwQ7p.L2vM5yB8.tR4cE1aD3.fG6hJ0n"
     unrelated_entropy = "P8mQ2rV6xN4bK9sT1wC7dF3hJ5aL0eG"
+    ssh_public_key = "ssh-ed25519 AAAA" + "a" * 40
     jwt = (
         "eyJ" + "hbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9."
         "eyJzdWIiOiIxMjM0NTY3ODkwIn0."
@@ -378,6 +379,37 @@ def build_cases() -> list[DetectionCase]:
         DetectionCase(
             "Anthropic token prefix in documentation",
             'example = "sk-ant-placeholder"',
+            False,
+        ),
+        DetectionCase(
+            "Truncated GitHub token in a secret field",
+            'token = "ghp_1234567890"',
+            False,
+        ),
+        DetectionCase(
+            "Truncated Google API key in a secret field",
+            'api_key = "AIza1234"',
+            False,
+        ),
+        DetectionCase(
+            "Malformed JWT with only two segments",
+            'jwt = "eyJheader.eyJpayload"',
+            False,
+        ),
+        DetectionCase(
+            "SSH public key",
+            f'public_key = "{ssh_public_key}"',
+            False,
+        ),
+        DetectionCase(
+            "Docker auth without a password",
+            '{"auths":{"registry.example.test":{"auth":"dXNlcg=="}}}',
+            False,
+            source=".docker/config.json",
+        ),
+        DetectionCase(
+            "High-entropy key identifier",
+            f'key_id = "{unrelated_entropy}"',
             False,
         ),
         DetectionCase(
