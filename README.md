@@ -194,12 +194,14 @@ An AWS access key ID identifies a credential but cannot authenticate requests
 on its own. A matching secret access key is required.
 
 The scanner uses known formats and heuristics. It can miss unfamiliar
-credentials and may flag harmless values. A small synthetic regression corpus
-checks common formats, encoded provider tokens, complete private-key blocks,
-and benign lookalikes. CI reports finding-level precision and recall and guards
-them at 95% or higher. These synthetic results are regression checks, not a
-measure of real-world accuracy. The test corpus is versioned independently from
-the built-in rule pack; machine-readable reports include the rule-pack version.
+credentials and may flag harmless values. A synthetic regression corpus checks
+common formats, encoded provider tokens, complete private-key blocks, and
+benign lookalikes. CI reports finding-level and per-detector precision and
+recall, with aggregate metrics guarded at 95% or higher. Each labeled case must
+also match its expected detector exactly. These synthetic results are
+regression checks, not a measure of real-world accuracy. The test corpus is
+versioned independently from the built-in rule pack; machine-readable reports
+include the rule-pack version.
 Run it with `python tests/test_detection_quality.py`.
 Confidence describes match strength, not whether a provider currently accepts
 the credential. Exact built-in format matches and complete private-key blocks
