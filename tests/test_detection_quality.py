@@ -638,6 +638,34 @@ class TestDetectionQuality(unittest.TestCase):
             )
         )
 
+    def test_metrics_count_wrong_detector_as_false_positive_and_negative(self) -> None:
+        """A finding with the wrong detector must not count as a correct case."""
+        case = DetectionCase(
+            name="misclassified Anthropic key",
+            content=(
+                'api_key = "sk-ant-'
+                '0123456789abcdefghijklmnopqrstuvwxyz"'
+            ),
+            should_detect=True,
+            expected_matcher="OpenAI API Key",
+        )
+
+        overall, per_detector = evaluate_cases([case])
+
+        self.assertEqual(overall.true_positive, 0)
+        self.assertEqual(overall.false_positive, 1)
+        self.assertEqual(overall.false_negative, 1)
+        self.assertEqual(
+            per_detector["Anthropic API Key"].false_positive,
+            1,
+        )
+        self.assertEqual(
+            per_detector["OpenAI API Key"].false_negative,
+            1,
+        )
+        self.assertEqual(overall.precision, 0.0)
+        self.assertEqual(overall.recall, 0.0)
+
     def test_synthetic_corpus_precision_and_recall(self) -> None:
         """Report corpus precision and recall and guard its current examples."""
         cases = build_cases()
