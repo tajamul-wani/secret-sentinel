@@ -38,8 +38,12 @@ def is_text_bytes(data: bytes) -> bool:
         return True
     if b"\0" in data:
         return False
-    text_chars = bytes(range(32, 127)) + b"\n\r\t\b"
-    return all(byte in text_chars for byte in data[:1024])
+    # Bytes >= 0x80 are allowed so UTF-8 and Latin-1 text are not mistaken for binary.
+    sample = data[:4096]
+    control_bytes = sum(
+        1 for byte in sample if byte < 32 and byte not in b"\n\r\t\b\f\v\x1b"
+    )
+    return control_bytes / len(sample) < 0.05
 
 
 def mask_secret(value: str) -> str:

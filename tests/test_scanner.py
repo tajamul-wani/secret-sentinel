@@ -1119,5 +1119,23 @@ class TestScanner(unittest.TestCase):
                 get_staged_content("file1.py")
 
 
+class TestRulePackThree(unittest.TestCase):
+    """Rules and fixes added in rule pack 3."""
+
+    BODY = "a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8"
+
+    def matchers(self, content: str, source: str = "app.py") -> list:
+        return [issue["matcher"] for issue in scan_text(content, source)]
+
+    def test_scans_files_with_non_ascii_text(self) -> None:
+        """UTF-8 files with accented text should still be scanned."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "config.py")
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write(f'# Café config\ntoken = "ghp_{self.BODY}"\n')
+            issues = scan_paths([path], repo_root=tmpdir)
+        self.assertEqual([i["matcher"] for i in issues], ["GitHub Token"])
+
+
 if __name__ == "__main__":
     unittest.main()

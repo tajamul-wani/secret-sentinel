@@ -41,6 +41,12 @@ class TestUtils(unittest.TestCase):
         """Arbitrary non-text binary bytes should not be recognized as text."""
         self.assertFalse(is_text_bytes(bytes([1, 2, 3, 4, 5])))
 
+    def test_is_text_bytes_accepts_utf8_and_latin1(self) -> None:
+        """Non-ASCII text encodings should not be mistaken for binary."""
+        self.assertTrue(is_text_bytes("# Café — résumé ✓\n".encode("utf-8")))
+        self.assertTrue(is_text_bytes(b"\xef\xbb\xbfkey = 1\n"))
+        self.assertTrue(is_text_bytes("naïve = 1\n".encode("latin-1")))
+
     def test_mask_secret(self) -> None:
         """Masking should return redacted placeholder."""
         self.assertEqual(mask_secret("super_secret_key_12345"), "[REDACTED]")
