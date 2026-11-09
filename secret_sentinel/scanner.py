@@ -1017,7 +1017,7 @@ def _scan_git_tree_paths(
         raise RuntimeError("Unable to read repository history for scanning.")
 
     active_ignores = DEFAULT_IGNORE if ignore_globs is None else ignore_globs
-    issues: List[Dict[str, Any]] = []
+    blobs: List[tuple[str, str]] = []
     for entry in tree_result.stdout.split(b"\0"):
         if not entry:
             continue
@@ -1025,25 +1025,47 @@ def _scan_git_tree_paths(
         _mode, object_type, blob_oid = metadata.decode("ascii").split()
         if object_type != "blob":
             continue
-        path = os.fsdecode(raw_path)
-        absolute_path = os.path.join(repo_root, path)
-        if _is_ignored(absolute_path, active_ignores, repo_root):
-            continue
+        absolute_path = os.path.join(repo_root, os.fsdecode(raw_path))
+        if not _is_ignored(absolute_path, active_ignores, repo_root):
+            blobs.append((absolute_path, blob_oid))
 
-        blob_result = _run_git_command(
-            ["cat-file", "blob", blob_oid],
-            cwd=repo_root,
-            text=False,
-        )
-        if blob_result.returncode != 0:
-            raise RuntimeError("Unable to read repository history for scanning.")
-        if not is_text_bytes(blob_result.stdout):
+    issues: List[Dict[str, Any]] = []
+    for (absolute_path, _oid), data in zip(blobs, _read_git_blobs(repo_root, blobs)):
+        if not is_text_bytes(data):
             continue
-
         source = _sanitize_source_path(absolute_path, repo_root)
-        content = blob_result.stdout.decode("utf-8", errors="replace")
+        content = data.decode("utf-8", errors="replace")
         issues.extend(scan_text(content, source, custom_rules=custom_rules))
     return issues
+
+
+def _read_git_blobs(repo_root: str, blobs: List[tuple[str, str]]) -> List[bytes]:
+    """Read blob contents with one `git cat-file --batch` process."""
+    if not blobs:
+        return []
+    result = subprocess.run(
+        ["git", "cat-file", "--batch"],
+        cwd=repo_root,
+        input="".join(f"{oid}\n" for _path, oid in blobs).encode("ascii"),
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError("Unable to read repository history for scanning.")
+
+    contents: List[bytes] = []
+    output = result.stdout
+    offset = 0
+    for _path, oid in blobs:
+        header_end = output.index(b"\n", offset)
+        header = output[offset:header_end].split()
+        if len(header) != 3 or header[0].decode("ascii") != oid or header[1] != b"blob":
+            raise RuntimeError("Unable to read repository history for scanning.")
+        size = int(header[2])
+        start = header_end + 1
+        contents.append(output[start:start + size])
+        offset = start + size + 1
+    return contents
 
 
 def scan_git_diff(
