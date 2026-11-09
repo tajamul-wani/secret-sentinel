@@ -3,7 +3,7 @@ name = "secret-sentinel"
 version = "0.1.0"
 description = "Local AI-assisted secret scanner for Git pre-commit hooks."
 authors = [
-  {name = "Secret Sentinel", email = "hello@secretsentinel.example"}
+  {name = "Tajamul Wani"}
 ]
 readme = "README.md"
 requires-python = ">=3.10"
