@@ -1136,6 +1136,23 @@ class TestRulePackThree(unittest.TestCase):
             issues = scan_paths([path], repo_root=tmpdir)
         self.assertEqual([i["matcher"] for i in issues], ["GitHub Token"])
 
+    def test_detects_provider_tokens(self) -> None:
+        """Newer GitHub formats and added providers should be detected."""
+        cases = {
+            f'a = "gho_{self.BODY}"': "GitHub Token",
+            f'a = "github_pat_{"A" * 82}"': "GitHub Token",
+            'a = "glpat-' + "AbCdEfGhIjKlMnOpQrSt" + '"': "GitLab Token",
+            f'a = "SG.{"a" * 22}.{"b" * 43}"': "SendGrid API Key",
+            f'a = "AccountName=x;AccountKey={"Q" * 86}==;"': "Azure Storage Account Key",
+            f'a = "GOCSPX-{"c" * 28}"': "Google OAuth Client Secret",
+            f'a = "shpat_{"0" * 32}"': "Shopify Access Token",
+            f'a = "dop_v1_{"f" * 64}"': "DigitalOcean Token",
+            f'a = "dapi{"e" * 32}"': "Databricks Token",
+        }
+        for content, matcher in cases.items():
+            with self.subTest(matcher=matcher):
+                self.assertIn(matcher, self.matchers(content))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -14,7 +14,7 @@ from .config import CustomRule
 from .utils import is_text_bytes, sanitize_snippet, shannon_entropy
 from .risk_scoring import get_risk_score
 
-RULE_PACK_VERSION = "2"
+RULE_PACK_VERSION = "3"
 
 SECRET_PATTERNS = {
     "AWS Access Key ID": re.compile(
@@ -25,7 +25,10 @@ SECRET_PATTERNS = {
     ),
     "Google API Key": re.compile(r"\bAIza[0-9A-Za-z\-_]{35}\b"),
     "Stripe API Key": re.compile(r"\b(?:sk|rk)_(?:test|live)_[A-Za-z0-9]{24,}\b"),
-    "GitHub Token": re.compile(r"\bghp_[A-Za-z0-9_]{36}\b"),
+    "GitHub Token": re.compile(
+        r"\b(?:gh[pousr]_[A-Za-z0-9_]{36}|github_pat_[A-Za-z0-9_]{82})\b"
+    ),
+    "GitLab Token": re.compile(r"\bgl(?:pat|dt|ptt|rt)-[A-Za-z0-9_\-]{20,}"),
     "Slack Token": re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{10,}\b"),
     "JWT": re.compile(r"\beyJ[0-9A-Za-z_\-]+\.[0-9A-Za-z_\-]+\.[0-9A-Za-z_\-]+\b"),
     "Twilio Secret Key": re.compile(r"\bSK[0-9a-fA-F]{32}\b"),
@@ -38,6 +41,17 @@ SECRET_PATTERNS = {
     "HuggingFace Token": re.compile(r"\bhf_[A-Za-z0-9]{34}\b"),
     "PyPI API Token": re.compile(r"\bpypi-AgEIcHlwaS5vcmc[A-Za-z0-9_-]{50,}\b"),
     "NPM Access Token": re.compile(r"\bnpm_[A-Za-z0-9]{36}\b"),
+    "SendGrid API Key": re.compile(r"\bSG\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43}(?![A-Za-z0-9_-])"),
+    "Azure Storage Account Key": re.compile(r"(?i)\bAccountKey=([A-Za-z0-9+/]{86}==)"),
+    "Slack Webhook URL": re.compile(
+        r"https://hooks\.slack\.com/services/T[A-Z0-9]+/B[A-Z0-9]+/[A-Za-z0-9]{24}"
+    ),
+    "Google OAuth Client Secret": re.compile(r"\bGOCSPX-[A-Za-z0-9_-]{28}(?![A-Za-z0-9_-])"),
+    "Shopify Access Token": re.compile(r"\bshp(?:at|ca|pa|ss)_[a-fA-F0-9]{32}\b"),
+    "DigitalOcean Token": re.compile(r"\bdo[opr]_v1_[a-f0-9]{64}\b"),
+    "Telegram Bot Token": re.compile(r"\b\d{8,10}:AA[A-Za-z0-9_-]{33}(?![A-Za-z0-9_-])"),
+    "Databricks Token": re.compile(r"\bdapi[a-f0-9]{32}(?:-\d)?\b"),
+    "Mailchimp API Key": re.compile(r"\b[0-9a-f]{32}-us\d{1,2}\b"),
     "Generic Secret Assignment": re.compile(
         r"(?i)(?<![A-Za-z0-9])[A-Za-z0-9_-]*?"
         r"(?:api[_\-]?key|app[_\-]?key|secret(?:[_\-]?key(?:[_\-]?base)?)?"
