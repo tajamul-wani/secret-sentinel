@@ -67,8 +67,8 @@ class TestGitHubWorkflow(unittest.TestCase):
 
     def test_readme_workflow_example_scans_pr_range_without_credentials(self) -> None:
         """The copyable README workflow should implement the same safe PR scan."""
-        section_start = self.readme.index("### GitHub Actions")
-        section_end = self.readme.index("### Output Formats", section_start)
+        section_start = self.readme.index("## CI")
+        section_end = self.readme.index("## Development", section_start)
         section = self.readme[section_start:section_end]
         match = re.search(r"```yaml\n(.*?)\n```", section, re.DOTALL)
         self.assertIsNotNone(match, "README GitHub Actions YAML example is missing")
