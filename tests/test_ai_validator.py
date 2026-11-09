@@ -55,6 +55,16 @@ class TestAIValidator(unittest.TestCase):
         with patch("secret_sentinel.ai_validator._query_ollama", return_value="FALSE_POSITIVE"):
             self.assertFalse(validate_issue(issue, "surrounding code"))
 
+    def test_validate_issue_never_dismisses_provider_specific_matches(self) -> None:
+        """Provider-format findings should be kept without consulting the AI."""
+        issue = {"value": "mock_token", "matcher": "GitHub Token"}
+        with patch(
+            "secret_sentinel.ai_validator._query_ollama",
+            return_value="FALSE_POSITIVE",
+        ) as query:
+            self.assertTrue(validate_issue(issue, "surrounding code"))
+        query.assert_not_called()
+
     def test_validate_issue_requires_exact_false_positive_response(self) -> None:
         """Explanatory or malformed responses should not discard a finding."""
         issue = {"value": "mock_token", "confidence": "medium"}
@@ -79,7 +89,7 @@ class TestAIValidator(unittest.TestCase):
 
     def test_validate_issue_redacts_value_before_local_validation(self) -> None:
         """AI prompts should not contain the detected secret value."""
-        issue = {"value": "sensitive_value", "matcher": "test token", "confidence": "high"}
+        issue = {"value": "sensitive_value", "matcher": "Generic Secret Assignment", "confidence": "high"}
         with patch("secret_sentinel.ai_validator._query_ollama", return_value="REAL_SECRET") as query:
             self.assertTrue(validate_issue(issue, "token = sensitive_value"))
         prompt = query.call_args.args[0]
@@ -105,7 +115,7 @@ class TestAIValidator(unittest.TestCase):
         """AI prompts should not contain a detected database connection URI."""
         issue = {
             "value": "database_password",
-            "matcher": "Database Connection URI",
+            "matcher": "Generic Secret Assignment",
             "confidence": "high",
         }
         uri = "postgresql://admin:database_password@internal.example:5432/app"
