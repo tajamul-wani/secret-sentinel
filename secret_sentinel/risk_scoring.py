@@ -47,6 +47,7 @@ SECRET_RISK_SCORES: Dict[str, SeverityLevel] = {
     "Telegram Bot Token": SeverityLevel.HIGH,
     "Databricks Token": SeverityLevel.CRITICAL,
     "Mailchimp API Key": SeverityLevel.HIGH,
+    "Password Assignment": SeverityLevel.HIGH,
     "JWT": SeverityLevel.HIGH,
     "Generic Secret Assignment": SeverityLevel.HIGH,
     "High entropy string": SeverityLevel.MEDIUM,

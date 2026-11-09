@@ -95,6 +95,16 @@ NETRC_PASSWORD_PATTERN = re.compile(
 PGPASS_ENTRY_PATTERN = re.compile(
     r"^([^:#\s][^:]*):([^:]*):([^:]*):([^:]*):((?:\\.|[^:\s])+)\s*$"
 )
+# Password-style values are matched separately from the generic rule so that
+# shorter values and symbol characters are covered without widening it.
+QUOTED_PASSWORD_PATTERN = re.compile(
+    r"""(?i)(?<![A-Za-z0-9])[A-Za-z0-9_-]*?(?:password|passwd|secret)(?![A-Za-z0-9])"""
+    r"""["']?\s*[:=]\s*(?P<quote>["'])(?P<value>[^\s"']{8,})(?P=quote)"""
+)
+ENV_PASSWORD_PATTERN = re.compile(
+    r"""(?i)^\s*(?:export\s+)?[A-Za-z0-9_]*(?:password|passwd|secret)="""
+    r"""(?P<quote>["']?)(?P<value>[^\s"']{8,})(?P=quote)(?:\s+#.*)?\s*$"""
+)
 DOCKER_AUTH_PATTERN = re.compile(
     r"""(?i)["']auth["']\s*:\s*["']([A-Za-z0-9+/]+={0,2})["']"""
 )
@@ -449,7 +459,33 @@ def _scan_line(
                     "severity": severity.name,
                 }
             )
+    for pattern in (QUOTED_PASSWORD_PATTERN, ENV_PASSWORD_PATTERN):
+        for match in pattern.finditer(line):
+            value = match.group("value")
+            if not _looks_like_password(value) or any(
+                issue["value"] in value or value in issue["value"]
+                for issue in issues
+            ):
+                continue
+            finding = _build_issue(source, lineno, line, "Password Assignment", value)
+            finding["confidence"] = "medium"
+            issues.append(finding)
     return issues
+
+
+def _looks_like_password(value: str) -> bool:
+    """Return whether a password-style value is plausibly a real credential."""
+    if PLACEHOLDER_VALUE_PATTERN.fullmatch(value) or value[0] in "$%{<[(":
+        return False
+    if len(set(value)) < 4 or "(" in value or value.lower().startswith(("http", "/")):
+        return False
+    classes = (
+        any(ch.islower() for ch in value),
+        any(ch.isupper() for ch in value),
+        any(ch.isdigit() for ch in value),
+        any(not ch.isalnum() for ch in value),
+    )
+    return sum(classes) >= 2
 
 
 def _build_issue(

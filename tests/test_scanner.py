@@ -1153,6 +1153,31 @@ class TestRulePackThree(unittest.TestCase):
             with self.subTest(matcher=matcher):
                 self.assertIn(matcher, self.matchers(content))
 
+    def test_detects_password_assignments(self) -> None:
+        """Short and symbol-heavy password values should be detected."""
+        for content in (
+            'password = "Summer2024!"',
+            "DB_PASSWORD=Xk9#mQ2!vL7@pR4$",
+            'export API_SECRET="s3cr3t-Value!"',
+        ):
+            with self.subTest(content=content):
+                self.assertEqual(self.matchers(content, ".env"), ["Password Assignment"])
+
+    def test_ignores_password_placeholders(self) -> None:
+        """Placeholders, references, and plain words should not be reported."""
+        for content in (
+            'password = "password"',
+            'password = "${DB_PASSWORD}"',
+            'password = "********"',
+            'password: "Passwort eingeben"',
+            "PASSWORD=$DB_PASS",
+            'secret = "notsecret"',
+            "SECRET_KEY_PATH=/run/secrets/key",
+            'password = "%(db_pass)s"',
+        ):
+            with self.subTest(content=content):
+                self.assertEqual(self.matchers(content), [])
+
 
 if __name__ == "__main__":
     unittest.main()
