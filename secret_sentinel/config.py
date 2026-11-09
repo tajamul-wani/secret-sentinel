@@ -31,6 +31,11 @@ DEFAULT_IGNORE = [
     ".env/*",
     ".secret-sentinel/*",
     "node_modules/*",
+    # Dependency and cache directories nested anywhere, e.g. in monorepos.
+    "*/__pycache__/*",
+    "*/node_modules/*",
+    "*/.venv/*",
+    "*/venv/*",
 ]
 
 

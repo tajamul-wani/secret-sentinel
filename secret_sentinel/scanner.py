@@ -10,7 +10,7 @@ from datetime import date
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 
-from .config import CustomRule
+from .config import DEFAULT_IGNORE, CustomRule
 from .utils import is_text_bytes, sanitize_snippet, shannon_entropy
 from .risk_scoring import get_risk_score
 
@@ -112,20 +112,6 @@ DIFF_HUNK_PATTERN = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
 ENTROPY_THRESHOLD = 4.6
 MIN_ENTROPY_LENGTH = 24
 MAX_ENCODED_VALUE_LENGTH = 4096
-DEFAULT_IGNORE = [
-    "__pycache__/*",
-    "*.py[cod]",
-    "*.pyo",
-    "*.pyd",
-    ".git/*",
-    "venv/*",
-    ".venv/*",
-    ".venv*/*",
-    "env/*",
-    ".env/*",
-    ".secret-sentinel/*",
-    "node_modules/*",
-]
 
 
 @dataclass

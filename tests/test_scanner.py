@@ -1178,6 +1178,15 @@ class TestRulePackThree(unittest.TestCase):
             with self.subTest(content=content):
                 self.assertEqual(self.matchers(content), [])
 
+    def test_default_ignores_nested_dependency_directories(self) -> None:
+        """Nested node_modules and virtualenvs should be ignored by default."""
+        from secret_sentinel.config import DEFAULT_IGNORE
+
+        for path in ("/r/packages/a/node_modules/x.js", "/r/svc/.venv/lib/x.py"):
+            with self.subTest(path=path):
+                self.assertTrue(_is_ignored(path, DEFAULT_IGNORE, "/r"))
+        self.assertFalse(_is_ignored("/r/src/env/settings.py", DEFAULT_IGNORE, "/r"))
+
 
 if __name__ == "__main__":
     unittest.main()
