@@ -3,8 +3,8 @@
 Local secret scanner for Git repositories. It uses regex and entropy detection and has no runtime dependencies. Python 3.10+.
 
 ```bash
-python -m pip install .                    # or: pip install "git+https://github.com/tajamul-wani/secret-sentinel.git"
-python -m pip install -e ".[dev]"          # dev tooling
+pipx install secret-sentinel               # or: python -m pip install secret-sentinel
+python -m pip install -e ".[dev]"          # from a checkout, with dev tooling
 ```
 
 ## Usage
@@ -41,7 +41,7 @@ pre-commit framework:
 ```yaml
 repos:
   - repo: https://github.com/tajamul-wani/secret-sentinel
-    rev: <tag-or-sha>   # pin; do not track main
+    rev: v0.2.0
     hooks:
       - id: secret-sentinel   # runs: --staged --no-ai
 ```
@@ -61,7 +61,7 @@ ai_cloud_enabled = false
 Internal API Token = CRITICAL | \bcorp_[A-Za-z0-9]{32}\b
 ```
 
-- **Ignoring paths.** `.secretignore` takes one glob per line, and `#` starts a comment. Globs are matched with `fnmatch` against repo-relative paths, so `*` also matches `/`. Default ignores cover `.git`, `__pycache__`, `node_modules` and `venv`/`.venv` at any depth, plus root-level `env/` and `.env/` directories.
+- **Ignoring paths.** `.secretignore` takes one glob per line, and `#` starts a comment. Globs are matched with `fnmatch` against repo-relative paths, so `*` also matches `/`. Default ignores cover `.git`, `__pycache__`, `node_modules` and `venv`/`.venv` at any depth, root-level `env/` and `.env/` directories, and minified bundles and source maps (`*.min.js`, `*.min.css`, `*.map`). Lockfiles are still scanned, because registry URLs in them can carry tokens.
 - **Custom rules.** Each rule is `NAME = SEVERITY | REGEX`, and the reported value is the full match. An invalid severity, an invalid regex, a pattern that matches an empty string, or a name that clashes with a built-in rule exits with code `2`.
 
 ### Inline suppression
@@ -97,6 +97,7 @@ Rule pack `3`. Every rule is matched one line at a time, except private keys, wh
 - **Encoded secrets.** Base64 values found in secret-like fields are decoded and checked against the provider rules.
 - **Placeholders.** Values like `${VAR}`, `{{x}}`, `<x>`, `your_key_here`, `change-me` and `xxx` are not reported.
 - **What gets scanned.** A file counts as binary, and is skipped, if it contains a NUL byte or more than 5% control bytes. UTF-8 and Latin-1 text files are scanned.
+- **Size limit.** Files over 5 MB are skipped in every scan mode and logged by path. In `--coverage` output they're counted as `oversized`, and they mark the scan incomplete.
 
 ## AI validation (optional, off by default)
 
@@ -118,10 +119,11 @@ Scan results are stored locally in `.secret-sentinel/scan_history.jsonl`: counts
 
 ## CI
 
-Minimal PR scan:
+Use the GitHub Action:
 
 ```yaml
 on:
+  push:
   pull_request:
 permissions:
   contents: read
@@ -130,18 +132,25 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+      - uses: tajamul-wani/secret-sentinel@v0.2.0
         with:
-          fetch-depth: 0          # range scans need full history
-      - uses: actions/setup-python@v6
-        with:
-          python-version: "3.12"
-      - run: python -m pip install "git+https://github.com/tajamul-wani/secret-sentinel.git"
-      - env:
-          PR_BASE_REF: ${{ github.base_ref }}
-        run: secret-sentinel --commit-range "origin/$PR_BASE_REF" HEAD --no-ai
+          fail-on: HIGH          # optional, default LOW
+          # sarif: "true"        # send results to code scanning; needs security-events: write
 ```
 
-The baseline key is only passed to trusted pushes on `main`; pull-request scans run without it. See [.github/workflows/python-app.yml](.github/workflows/python-app.yml) for the full setup: tests on Python 3.10–3.12, `--baseline` on push, and SARIF upload to code scanning.
+What the action scans:
+
+| Event | Scan |
+|---|---|
+| Pull request | `--commit-range origin/<base> HEAD`, so a secret added and later removed is still caught |
+| Push | the pushed commits (`before..HEAD`) |
+| New branch, force push, other events | the working tree |
+
+The action fetches full history itself, so a shallow checkout works. It also installs Python 3.12 with `actions/setup-python`, which affects later steps in the same job. It never uses a baseline key.
+
+For extra protection, make the scan a required status check in branch protection. Local hooks can be skipped with `--no-verify`; CI can't.
+
+This repo's own workflow is [.github/workflows/python-app.yml](.github/workflows/python-app.yml). It runs the tests on Python 3.10–3.12, runs the action against the repo itself, scans pushes with `--baseline` and uploads SARIF. The baseline key is only passed to trusted pushes on `main`; pull-request scans run without it.
 
 ## Development
 
@@ -150,6 +159,8 @@ python -m unittest discover -s tests       # or: pytest
 python tests/run_coverage.py               # stdlib coverage, fails under 80%
 python -m scripts.benchmark_leaky_repo /path/to/leaky-repo --revision <sha>
 ```
+
+To release, bump `__version__` in `secret_sentinel/__init__.py`, which is the only place the version is defined. Then push a matching `vX.Y.Z` tag. [release.yml](.github/workflows/release.yml) checks that the tag matches the version, runs the tests, builds the package, publishes it to PyPI through trusted publishing (the `pypi` environment) and creates the GitHub release. Workflow actions are pinned by commit SHA.
 
 The detection quality tests (`tests/test_detection_quality.py`) run against a synthetic corpus and report precision and recall per rule. Because that corpus is maintained alongside the rules, use the Leaky Repo benchmark to see how detection holds up on outside data.
 

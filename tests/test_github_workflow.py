@@ -7,6 +7,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW_PATH = ROOT / ".github" / "workflows" / "python-app.yml"
 README_PATH = ROOT / "README.md"
+ACTION_PATH = ROOT / "action.yml"
 
 
 class TestGitHubWorkflow(unittest.TestCase):
@@ -17,6 +18,7 @@ class TestGitHubWorkflow(unittest.TestCase):
         """Read workflow and documentation sources once for contract tests."""
         cls.workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
         cls.readme = README_PATH.read_text(encoding="utf-8")
+        cls.action = ACTION_PATH.read_text(encoding="utf-8")
 
     def _workflow_step(self, name: str) -> str:
         """Return one named workflow step or fail if the step was removed."""
@@ -65,8 +67,15 @@ class TestGitHubWorkflow(unittest.TestCase):
         self.assertIn("secret-sentinel --baseline . --format sarif", step)
         self.assertIn("secret-sentinel . --format sarif", step)
 
-    def test_readme_workflow_example_scans_pr_range_without_credentials(self) -> None:
-        """The copyable README workflow should implement the same safe PR scan."""
+    def test_action_scans_pr_range_without_credentials(self) -> None:
+        """The published action should range-scan PRs and never use secrets."""
+        self.assertIn('--commit-range "origin/$BASE_REF" HEAD', self.action)
+        self.assertIn("git fetch --quiet --unshallow", self.action)
+        self.assertNotIn("SECRET_SENTINEL_BASELINE_KEY", self.action)
+        self.assertNotIn("${{ secrets.", self.action)
+
+    def test_readme_ci_example_uses_action_without_credentials(self) -> None:
+        """The copyable README workflow should use the action and no secrets."""
         section_start = self.readme.index("## CI")
         section_end = self.readme.index("## Development", section_start)
         section = self.readme[section_start:section_end]
@@ -76,11 +85,7 @@ class TestGitHubWorkflow(unittest.TestCase):
 
         self.assertIn("pull_request:", example)
         self.assertIn("permissions:\n  contents: read", example)
-        self.assertIn("fetch-depth: 0", example)
-        self.assertIn("PR_BASE_REF: ${{ github.base_ref }}", example)
-        self.assertIn(
-            'secret-sentinel --commit-range "origin/$PR_BASE_REF" HEAD', example
-        )
+        self.assertIn("uses: tajamul-wani/secret-sentinel@v", example)
         self.assertNotIn("SECRET_SENTINEL_BASELINE_KEY", example)
         self.assertNotIn("secrets.", example)
         self.assertIn(
@@ -89,6 +94,12 @@ class TestGitHubWorkflow(unittest.TestCase):
         )
         self.assertIn("pull-request scans run without it.", section)
 
+    def test_readme_pins_current_release(self) -> None:
+        """Documented action and pre-commit pins should match the package version."""
+        from secret_sentinel import __version__
+
+        self.assertIn(f"tajamul-wani/secret-sentinel@v{__version__}", self.readme)
+        self.assertIn(f"rev: v{__version__}", self.readme)
 
 if __name__ == "__main__":
     unittest.main()
