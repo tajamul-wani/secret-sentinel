@@ -3,12 +3,12 @@
 import tempfile
 from unittest import TestCase
 
+from secret_sentinel.history import ScanHistory
 from secret_sentinel.risk_scoring import (
     SeverityLevel,
-    get_risk_score,
     calculate_overall_severity,
+    get_risk_score,
 )
-from secret_sentinel.history import ScanHistory
 
 
 class TestRiskScoring(TestCase):

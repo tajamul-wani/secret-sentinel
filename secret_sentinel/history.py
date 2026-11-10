@@ -4,7 +4,7 @@ import json
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from .risk_scoring import SeverityLevel, get_issue_severity
 
@@ -15,7 +15,7 @@ class ScanHistory:
     HISTORY_DIR = ".secret-sentinel"
     HISTORY_FILE = "scan_history.jsonl"
 
-    def __init__(self, repo_root: Optional[str] = None) -> None:
+    def __init__(self, repo_root: str | None = None) -> None:
         """Initialize history manager.
 
         Args:
@@ -31,7 +31,7 @@ class ScanHistory:
 
     def record_scan(
         self,
-        issues: List[Dict[str, Any]],
+        issues: list[dict[str, Any]],
         scan_type: str = "manual",
         status: str = "completed",
     ) -> None:
@@ -62,7 +62,7 @@ class ScanHistory:
         with open(self.history_file, "a", encoding="utf-8") as handle:
             handle.write(json.dumps(record) + "\n")
 
-    def get_history(self, limit: Optional[int] = None) -> List[Dict[str, Any]]:
+    def get_history(self, limit: int | None = None) -> list[dict[str, Any]]:
         """Retrieve scan history.
 
         Args:
@@ -74,7 +74,7 @@ class ScanHistory:
         if not self.history_file.exists():
             return []
 
-        records: List[Dict[str, Any]] = []
+        records: list[dict[str, Any]] = []
         with open(self.history_file, "r", encoding="utf-8") as handle:
             for line in handle:
                 stripped = line.strip()
@@ -91,7 +91,7 @@ class ScanHistory:
 
         return records
 
-    def get_statistics(self) -> Dict[str, Any]:
+    def get_statistics(self) -> dict[str, Any]:
         """Compute aggregated statistics from scan history.
 
         Returns:
@@ -110,14 +110,14 @@ class ScanHistory:
 
         total_issues = sum(int(record.get("total_issues", 0)) for record in history)
 
-        severity_summary: Dict[str, int] = {}
+        severity_summary: dict[str, int] = {}
         for level in SeverityLevel:
             severity_summary[level.name] = sum(
                 int(record.get("severity_counts", {}).get(level.name, 0))
                 for record in history
             )
 
-        scan_types: Dict[str, int] = {}
+        scan_types: dict[str, int] = {}
         for record in history:
             scan_type = str(record.get("scan_type", "unknown"))
             scan_types[scan_type] = scan_types.get(scan_type, 0) + 1
@@ -139,7 +139,7 @@ class ScanHistory:
                 pass
 
     @staticmethod
-    def _count_by_severity(issues: List[Dict[str, Any]]) -> Dict[SeverityLevel, int]:
+    def _count_by_severity(issues: list[dict[str, Any]]) -> dict[SeverityLevel, int]:
         """Count issues grouped by severity level.
 
         Args:
@@ -157,7 +157,7 @@ class ScanHistory:
         return counts
 
     @staticmethod
-    def _summarize_issues(issues: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _summarize_issues(issues: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Summarize issues for audit history without storing sensitive secret values.
 
         Args:

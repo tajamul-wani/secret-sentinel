@@ -1,7 +1,7 @@
 """Risk scoring module for assigning severity levels to detected secrets."""
 
 from enum import Enum
-from typing import Any, Dict, List
+from typing import Any
 
 
 class SeverityLevel(Enum):
@@ -18,7 +18,7 @@ class SeverityLevel(Enum):
 
 
 # Risk scores assigned to each secret type
-SECRET_RISK_SCORES: Dict[str, SeverityLevel] = {
+SECRET_RISK_SCORES: dict[str, SeverityLevel] = {
     "AWS Access Key ID": SeverityLevel.MEDIUM,
     # Keep the former matcher name available for existing baselines and reports.
     "AWS Secret Access Key": SeverityLevel.CRITICAL,
@@ -66,7 +66,7 @@ def get_risk_score(matcher: str) -> SeverityLevel:
     return SECRET_RISK_SCORES.get(matcher, SeverityLevel.MEDIUM)
 
 
-def get_issue_severity(issue: Dict[str, Any]) -> SeverityLevel:
+def get_issue_severity(issue: dict[str, Any]) -> SeverityLevel:
     """Return a valid explicit issue severity or the built-in matcher score."""
     severity_name = issue.get("severity")
     if isinstance(severity_name, str):
@@ -77,7 +77,7 @@ def get_issue_severity(issue: Dict[str, Any]) -> SeverityLevel:
     return get_risk_score(str(issue.get("matcher", "High entropy string")))
 
 
-def calculate_overall_severity(issues: List[Dict[str, Any]]) -> SeverityLevel:
+def calculate_overall_severity(issues: list[dict[str, Any]]) -> SeverityLevel:
     """Calculate the overall severity level for a set of issues.
 
     Args:

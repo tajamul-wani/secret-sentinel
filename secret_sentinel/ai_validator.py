@@ -5,7 +5,7 @@ import logging
 import os
 import re
 import subprocess
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from .scanner import SECRET_PATTERNS
 
@@ -28,7 +28,7 @@ PRIVATE_KEY_BLOCK_PATTERN = re.compile(
 )
 
 
-def _redact_context(context: str, issues: List[Dict[str, Any]]) -> str:
+def _redact_context(context: str, issues: list[dict[str, Any]]) -> str:
     """Redact detected credential patterns and values from AI context."""
     redacted = PRIVATE_KEY_BLOCK_PATTERN.sub("[REDACTED PRIVATE KEY]", context)
     for pattern in SECRET_PATTERNS.values():
@@ -40,7 +40,7 @@ def _redact_context(context: str, issues: List[Dict[str, Any]]) -> str:
     return redacted
 
 
-def _run_command(args: List[str], cwd: Optional[str] = None, timeout: int = 5) -> Optional[subprocess.CompletedProcess]:
+def _run_command(args: list[str], cwd: str | None = None, timeout: int = 5) -> subprocess.CompletedProcess | None:
     """Execute a local command with timeout and error handling.
 
     Args:
@@ -64,7 +64,7 @@ def _run_command(args: List[str], cwd: Optional[str] = None, timeout: int = 5) -
         return None
 
 
-def _query_ollama(prompt: str) -> Optional[str]:
+def _query_ollama(prompt: str) -> str | None:
     """Query a local Ollama instance for validation if available.
 
     Args:
@@ -82,7 +82,7 @@ def _query_ollama(prompt: str) -> Optional[str]:
     return None
 
 
-def _query_gemini(prompt: str) -> Optional[str]:
+def _query_gemini(prompt: str) -> str | None:
     """Query optional cloud AI endpoint if configured.
 
     Args:
@@ -127,13 +127,14 @@ def _query_gemini(prompt: str) -> Optional[str]:
                     parts = candidates[0].get("content", {}).get("parts", [])
                     if parts:
                         return str(parts[0].get("text", "")).strip()
-    except Exception:
+    except (OSError, ValueError, AttributeError, TypeError):
+        # Network failures, timeouts, and malformed responses all fall back.
         return None
     return None
 
 
 def validate_issue(
-    issue: Dict[str, Any],
+    issue: dict[str, Any],
     surrounding: str,
     allow_cloud: bool = False,
 ) -> bool:
@@ -169,10 +170,7 @@ def validate_issue(
     if not response:
         return True
 
-    normalized = response.strip().upper()
-    if normalized == "FALSE_POSITIVE":
-        return False
-    return True
+    return response.strip().upper() != "FALSE_POSITIVE"
 
 
 def build_surrounding_snippet(content: str, line_number: int, context: int = 2) -> str:
@@ -193,11 +191,11 @@ def build_surrounding_snippet(content: str, line_number: int, context: int = 2) 
 
 
 def validate_issues(
-    issues: List[Dict[str, Any]],
+    issues: list[dict[str, Any]],
     path: str,
     content: str,
     allow_cloud: bool = False,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Validate a collection of detected issues using context snippets.
 
     Args:
@@ -209,7 +207,7 @@ def validate_issues(
     Returns:
         Filtered list containing only verified issues.
     """
-    verified: List[Dict[str, Any]] = []
+    verified: list[dict[str, Any]] = []
     redacted_content = _redact_context(content, issues)
 
     for issue in issues:

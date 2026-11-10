@@ -1,13 +1,12 @@
 """Output formatters for Secret Sentinel scan results (Text, JSON, SARIF)."""
 
 import json
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from .remediation import get_remediation, get_remediation_preview
 from .risk_scoring import SeverityLevel, calculate_overall_severity, get_issue_severity
 from .scanner import RULE_PACK_VERSION
 from .utils import sanitize_snippet
-
 
 _DETECTION_EXPLANATIONS = {
     "pattern": ("pattern", "A built-in secret pattern matched."),
@@ -32,7 +31,7 @@ _DETECTION_EXPLANATIONS = {
 _CONFIDENCE_LEVELS = {"high", "medium", "low"}
 
 
-def _get_detection_details(issue: Dict[str, Any]) -> tuple[str, str]:
+def _get_detection_details(issue: dict[str, Any]) -> tuple[str, str]:
     """Return a static, secret-free detection reason and explanation."""
     reason = issue.get("reason")
     if isinstance(reason, str):
@@ -50,7 +49,7 @@ def _get_detection_details(issue: Dict[str, Any]) -> tuple[str, str]:
     return "unknown", "A configured detector identified a potential secret."
 
 
-def _get_evidence(issue: Dict[str, Any]) -> str:
+def _get_evidence(issue: dict[str, Any]) -> str:
     """Return a static explanation of the signal without exposing the value."""
     reason = issue.get("reason")
     if reason == "pattern":
@@ -67,7 +66,7 @@ def _get_evidence(issue: Dict[str, Any]) -> str:
     return evidence.get(str(reason), "Unspecified detector signal")
 
 
-def _get_confidence(issue: Dict[str, Any]) -> str:
+def _get_confidence(issue: dict[str, Any]) -> str:
     """Return a supported confidence label, or a safe unspecified value."""
     confidence = issue.get("confidence")
     if isinstance(confidence, str) and confidence.lower() in _CONFIDENCE_LEVELS:
@@ -76,10 +75,10 @@ def _get_confidence(issue: Dict[str, Any]) -> str:
 
 
 def format_text(
-    issues: List[Dict[str, Any]],
-    fail_on: Optional[SeverityLevel] = None,
+    issues: list[dict[str, Any]],
+    fail_on: SeverityLevel | None = None,
     baseline_suppressed: int = 0,
-    coverage: Optional[Dict[str, int]] = None,
+    coverage: dict[str, int] | None = None,
 ) -> str:
     """Format scan issues into human-readable text.
 
@@ -191,7 +190,7 @@ def format_text(
     return "\n".join(lines)
 
 
-def _format_coverage(coverage: Dict[str, int]) -> str:
+def _format_coverage(coverage: dict[str, int]) -> str:
     """Format a scan coverage summary."""
     return (
         "Coverage: "
@@ -205,10 +204,10 @@ def _format_coverage(coverage: Dict[str, int]) -> str:
 
 
 def format_json(
-    issues: List[Dict[str, Any]],
-    fail_on: Optional[SeverityLevel] = None,
+    issues: list[dict[str, Any]],
+    fail_on: SeverityLevel | None = None,
     baseline_suppressed: int = 0,
-    coverage: Optional[Dict[str, int]] = None,
+    coverage: dict[str, int] | None = None,
 ) -> str:
     """Format scan issues into machine-readable JSON without leaking credentials.
 
@@ -236,7 +235,7 @@ def format_json(
     else:
         status = "warning"
 
-    sanitized_issues: List[Dict[str, Any]] = []
+    sanitized_issues: list[dict[str, Any]] = []
     for issue in issues:
         raw_snippet = str(issue.get("snippet", ""))
         secret_val = str(issue.get("value", ""))
@@ -284,10 +283,10 @@ def format_json(
 
 
 def format_sarif(
-    issues: List[Dict[str, Any]],
-    repo_root: Optional[str] = None,
+    issues: list[dict[str, Any]],
+    repo_root: str | None = None,
     baseline_suppressed: int = 0,
-    coverage: Optional[Dict[str, int]] = None,
+    coverage: dict[str, int] | None = None,
 ) -> str:
     """Format scan issues into SARIF v2.1.0 format for GitHub Code Scanning.
 
@@ -298,8 +297,8 @@ def format_sarif(
     Returns:
         SARIF formatted JSON string.
     """
-    rules_dict: Dict[str, Dict[str, Any]] = {}
-    sarif_results: List[Dict[str, Any]] = []
+    rules_dict: dict[str, dict[str, Any]] = {}
+    sarif_results: list[dict[str, Any]] = []
 
     for issue in issues:
         rule_id = str(issue.get("matcher", "SecretDetection"))
@@ -378,7 +377,7 @@ def format_sarif(
             }
         ]
     }
-    run_properties: Dict[str, Any] = {"rulePackVersion": RULE_PACK_VERSION}
+    run_properties: dict[str, Any] = {"rulePackVersion": RULE_PACK_VERSION}
     if baseline_suppressed:
         run_properties["baselineSuppressed"] = baseline_suppressed
     if coverage is not None:
@@ -392,7 +391,7 @@ def format_sarif(
 
 
 def format_suppression_audit_text(
-    suppressions: List[Dict[str, Any]],
+    suppressions: list[dict[str, Any]],
 ) -> str:
     """Format suppression audit records as human-readable text."""
     if not suppressions:
@@ -427,7 +426,7 @@ def format_suppression_audit_text(
 
 
 def format_suppression_audit_json(
-    suppressions: List[Dict[str, Any]],
+    suppressions: list[dict[str, Any]],
 ) -> str:
     """Format suppression audit records as secret-free JSON."""
     needs_review = sum(
@@ -452,7 +451,7 @@ def format_suppression_audit_json(
 
 
 def format_suppression_audit_sarif(
-    suppressions: List[Dict[str, Any]],
+    suppressions: list[dict[str, Any]],
 ) -> str:
     """Format suppression audit records as SARIF v2.1.0 diagnostics."""
     rules = [
@@ -469,14 +468,14 @@ def format_suppression_audit_sarif(
             "defaultConfiguration": {"level": "warning"},
         },
     ]
-    results: List[Dict[str, Any]] = []
+    results: list[dict[str, Any]] = []
     for suppression in suppressions:
         statuses = suppression.get("statuses", [])
         needs_review = statuses != ["active"]
         status_text = ", ".join(
             str(status).replace("-", " ") for status in statuses
         )
-        result: Dict[str, Any] = {
+        result: dict[str, Any] = {
             "ruleId": "suppression-review" if needs_review else "suppression-active",
             "level": "warning" if needs_review else "note",
             "message": {

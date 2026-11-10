@@ -2,6 +2,7 @@
 
 import json
 import unittest
+import urllib.error
 from unittest.mock import MagicMock, patch
 
 from secret_sentinel.ai_validator import (
@@ -38,16 +39,20 @@ class TestAIValidator(unittest.TestCase):
     def test_validate_issue_fallback_high_confidence(self) -> None:
         """Fallback without AI should preserve high confidence issues."""
         issue = {"value": "some_secret", "confidence": "high"}
-        with patch("secret_sentinel.ai_validator._query_ollama", return_value=None):
-            with patch("secret_sentinel.ai_validator._query_gemini", return_value=None):
-                self.assertTrue(validate_issue(issue, "surrounding code"))
+        with (
+            patch("secret_sentinel.ai_validator._query_ollama", return_value=None),
+            patch("secret_sentinel.ai_validator._query_gemini", return_value=None),
+        ):
+            self.assertTrue(validate_issue(issue, "surrounding code"))
 
     def test_validate_issue_fallback_medium_confidence(self) -> None:
         """Fallback without AI should preserve medium-confidence findings."""
         issue = {"value": "entropy_string", "confidence": "medium"}
-        with patch("secret_sentinel.ai_validator._query_ollama", return_value=None):
-            with patch("secret_sentinel.ai_validator._query_gemini", return_value=None):
-                self.assertTrue(validate_issue(issue, "surrounding code"))
+        with (
+            patch("secret_sentinel.ai_validator._query_ollama", return_value=None),
+            patch("secret_sentinel.ai_validator._query_gemini", return_value=None),
+        ):
+            self.assertTrue(validate_issue(issue, "surrounding code"))
 
     def test_validate_issue_ai_marks_false_positive(self) -> None:
         """AI returning FALSE_POSITIVE should cause validation to return False."""
@@ -74,12 +79,11 @@ class TestAIValidator(unittest.TestCase):
             "UNKNOWN",
         )
         for response in responses:
-            with self.subTest(response=response):
-                with patch(
-                    "secret_sentinel.ai_validator._query_ollama",
-                    return_value=response,
-                ):
-                    self.assertTrue(validate_issue(issue, "surrounding code"))
+            with self.subTest(response=response), patch(
+                "secret_sentinel.ai_validator._query_ollama",
+                return_value=response,
+            ):
+                self.assertTrue(validate_issue(issue, "surrounding code"))
 
     def test_validate_issue_ai_confirms_real_secret(self) -> None:
         """AI returning REAL_SECRET should cause validation to return True."""
@@ -128,15 +132,17 @@ class TestAIValidator(unittest.TestCase):
     def test_validate_issue_cloud_is_opt_in(self) -> None:
         """Gemini should only be used when cloud validation is explicitly allowed."""
         issue = {"value": "sensitive_value", "confidence": "high"}
-        with patch("secret_sentinel.ai_validator._query_ollama", return_value=None):
-            with patch(
-                "secret_sentinel.ai_validator._query_gemini",
-                return_value="REAL_SECRET",
-            ) as query:
-                self.assertTrue(validate_issue(issue, "context"))
-                query.assert_not_called()
-                self.assertTrue(validate_issue(issue, "context", allow_cloud=True))
-                query.assert_called_once()
+        with (
+            patch("secret_sentinel.ai_validator._query_ollama", return_value=None),
+            patch(
+            "secret_sentinel.ai_validator._query_gemini",
+            return_value="REAL_SECRET",
+        ) as query,
+        ):
+            self.assertTrue(validate_issue(issue, "context"))
+            query.assert_not_called()
+            self.assertTrue(validate_issue(issue, "context", allow_cloud=True))
+            query.assert_called_once()
 
     def test_validate_issues_filtering(self) -> None:
         """validate_issues should filter out false positives."""
@@ -174,10 +180,29 @@ class TestAIValidator(unittest.TestCase):
         mock_response.read.return_value = json.dumps(mock_response_data).encode("utf-8")
         mock_response.__enter__.return_value = mock_response
 
-        with patch.dict("os.environ", {"GEMINI_API_KEY": "fake_key_for_test"}):
-            with patch("urllib.request.urlopen", return_value=mock_response):
-                result = _query_gemini("test prompt")
-                self.assertEqual(result, "REAL_SECRET")
+        with (
+            patch.dict("os.environ", {"GEMINI_API_KEY": "fake_key_for_test"}),
+            patch("urllib.request.urlopen", return_value=mock_response),
+        ):
+            result = _query_gemini("test prompt")
+            self.assertEqual(result, "REAL_SECRET")
+
+    def test_query_gemini_failures_return_none(self) -> None:
+        """Network errors and malformed responses should fall back to None."""
+        malformed = MagicMock()
+        malformed.read.return_value = b'{"candidates": ["not-a-dict"]}'
+        malformed.__enter__.return_value = malformed
+        for outcome in (
+            {"side_effect": urllib.error.URLError("offline")},
+            {"side_effect": TimeoutError()},
+            {"return_value": malformed},
+        ):
+            with (
+                self.subTest(outcome=outcome),
+                patch.dict("os.environ", {"GEMINI_API_KEY": "fake_key_for_test"}),
+                patch("urllib.request.urlopen", **outcome),
+            ):
+                self.assertIsNone(_query_gemini("test prompt"))
 
     def test_query_ollama_success(self) -> None:
         """Querying Ollama with exit code 0 should return stripped stdout."""

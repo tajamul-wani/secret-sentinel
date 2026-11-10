@@ -4,7 +4,7 @@ import configparser
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional, Pattern
+from re import Pattern
 
 from .risk_scoring import SECRET_RISK_SCORES, SeverityLevel
 
@@ -48,11 +48,11 @@ class SecretSentinelConfig:
 
     def __init__(
         self,
-        ignore_globs: List[str],
+        ignore_globs: list[str],
         ai_enabled: bool,
         fail_on: SeverityLevel = SeverityLevel.LOW,
         ai_cloud_enabled: bool = False,
-        custom_rules: Optional[List[CustomRule]] = None,
+        custom_rules: list[CustomRule] | None = None,
     ) -> None:
         """Initialize configuration object.
 
@@ -91,7 +91,7 @@ class SecretSentinelConfig:
         ai_enabled = False
         ai_cloud_enabled = False
         fail_on = SeverityLevel.LOW
-        custom_rules: List[CustomRule] = []
+        custom_rules: list[CustomRule] = []
 
         root_path = Path(repo_root)
 

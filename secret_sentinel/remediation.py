@@ -1,7 +1,5 @@
 """Provider-specific response guidance for detected secret types."""
 
-from typing import Dict, List, Tuple
-
 
 _DEFAULT_GUIDANCE = (
     "If this value is a real credential, revoke or rotate it with its issuer.",
@@ -10,14 +8,20 @@ _DEFAULT_GUIDANCE = (
     "After revocation, remove the exposed value from repository history if needed.",
 )
 
-_REMEDIATION: Dict[str, Tuple[str, ...]] = {
+_REMEDIATION: dict[str, tuple[str, ...]] = {
     "AWS Access Key ID": (
-        "An access key ID alone cannot authenticate requests; "
-        "check whether its matching secret access key was also exposed.",
-        "Review CloudTrail and IAM activity for unexpected use of the "
-        "associated identity.",
-        "If the matching secret access key was exposed, deactivate the pair "
-        "and issue a replacement.",
+        (
+            "An access key ID alone cannot authenticate requests; "
+            "check whether its matching secret access key was also exposed."
+        ),
+        (
+            "Review CloudTrail and IAM activity for unexpected use of the "
+            "associated identity."
+        ),
+        (
+            "If the matching secret access key was exposed, deactivate the pair "
+            "and issue a replacement."
+        ),
     ),
     "AWS Secret Access Key": (
         "Deactivate the access key in IAM and issue a replacement for the affected identity.",
@@ -108,7 +112,7 @@ _REMEDIATION: Dict[str, Tuple[str, ...]] = {
 }
 
 
-def get_remediation(matcher: str) -> List[str]:
+def get_remediation(matcher: str) -> list[str]:
     """Return safe response steps for a detected matcher."""
     return list(_REMEDIATION.get(matcher, _DEFAULT_GUIDANCE))
 

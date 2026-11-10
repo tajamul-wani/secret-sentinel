@@ -1,7 +1,7 @@
 """Tests for Secret Sentinel scanner engine."""
 
-import os
 import base64
+import os
 import re
 import subprocess
 import tempfile
@@ -235,9 +235,11 @@ class TestScanner(unittest.TestCase):
 
     def test_scan_git_history_requires_repository_history(self) -> None:
         """History scan should report a clear error outside an initialized repo."""
-        with tempfile.TemporaryDirectory() as repo_root:
-            with self.assertRaisesRegex(RuntimeError, "Unable to read repository history"):
-                scan_git_history(repo_root)
+        with (
+            tempfile.TemporaryDirectory() as repo_root,
+            self.assertRaisesRegex(RuntimeError, "Unable to read repository history"),
+        ):
+            scan_git_history(repo_root)
 
     def test_scan_git_push_updates_scans_only_commits_not_on_remote(self) -> None:
         """Pushed ranges omit findings already reachable from the remote SHA."""
@@ -1018,16 +1020,18 @@ class TestScanner(unittest.TestCase):
 
     def test_scan_staged_files(self) -> None:
         """Scan staged files using mocked git output."""
-        with patch("secret_sentinel.scanner.get_staged_paths", return_value=["app.py"]):
-            with patch(
-                "secret_sentinel.scanner.get_staged_content",
-                return_value=f'api_key = "{DUMMY_AWS}"\n',
-            ):
-                issues = scan_staged_files()
-                self.assertTrue(
-                    any(i["matcher"] == "AWS Access Key ID" for i in issues)
-                )
-                self.assertEqual(issues[0]["source"], "app.py")
+        with (
+            patch("secret_sentinel.scanner.get_staged_paths", return_value=["app.py"]),
+            patch(
+            "secret_sentinel.scanner.get_staged_content",
+            return_value=f'api_key = "{DUMMY_AWS}"\n',
+        ),
+        ):
+            issues = scan_staged_files()
+            self.assertTrue(
+                any(i["matcher"] == "AWS Access Key ID" for i in issues)
+            )
+            self.assertEqual(issues[0]["source"], "app.py")
 
     def test_staged_paths_support_unusual_names_and_renames(self) -> None:
         """Staged scanning handles newlines, pathspec syntax, and renamed files."""
@@ -1066,9 +1070,11 @@ class TestScanner(unittest.TestCase):
         failed = subprocess.CompletedProcess(
             args=["git", "diff"], returncode=128, stdout=b"", stderr=b""
         )
-        with patch("secret_sentinel.scanner._run_git_command", return_value=failed):
-            with self.assertRaisesRegex(RuntimeError, "Unable to read staged files"):
-                get_staged_paths()
+        with (
+            patch("secret_sentinel.scanner._run_git_command", return_value=failed),
+            self.assertRaisesRegex(RuntimeError, "Unable to read staged files"),
+        ):
+            get_staged_paths()
 
     def test_scan_staged_files_applies_custom_rules(self) -> None:
         rule = CustomRule(
@@ -1076,22 +1082,26 @@ class TestScanner(unittest.TestCase):
             pattern=re.compile(r"\bcorp_[A-Za-z0-9]{20}\b"),
             severity=SeverityLevel.CRITICAL,
         )
-        with patch("secret_sentinel.scanner.get_staged_paths", return_value=["app.py"]):
-            with patch(
-                "secret_sentinel.scanner.get_staged_content",
-                return_value='token = "corp_' + "d" * 20 + '"\n',
-            ):
-                issues = scan_staged_files(custom_rules=[rule])
+        with (
+            patch("secret_sentinel.scanner.get_staged_paths", return_value=["app.py"]),
+            patch(
+            "secret_sentinel.scanner.get_staged_content",
+            return_value='token = "corp_' + "d" * 20 + '"\n',
+        ),
+        ):
+            issues = scan_staged_files(custom_rules=[rule])
 
         custom_issue = next(issue for issue in issues if issue["matcher"] == rule.name)
         self.assertEqual(custom_issue["severity"], "CRITICAL")
 
     def test_scan_staged_files_none_content(self) -> None:
         """Staged files returning None content should be safely skipped."""
-        with patch("secret_sentinel.scanner.get_staged_paths", return_value=["app.bin"]):
-            with patch("secret_sentinel.scanner.get_staged_content", return_value=None):
-                issues = scan_staged_files()
-                self.assertEqual(len(issues), 0)
+        with (
+            patch("secret_sentinel.scanner.get_staged_paths", return_value=["app.bin"]),
+            patch("secret_sentinel.scanner.get_staged_content", return_value=None),
+        ):
+            issues = scan_staged_files()
+            self.assertEqual(len(issues), 0)
 
     def test_git_helpers(self) -> None:
         """Test git utility commands."""

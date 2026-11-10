@@ -7,7 +7,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from . import __version__
 from .ai_validator import validate_issues
@@ -32,8 +32,10 @@ from .scanner import (
     scan_git_diff,
     scan_git_history,
     scan_git_push_updates,
-    scan_paths as scan_disk_paths,
     scan_staged_files,
+)
+from .scanner import (
+    scan_paths as scan_disk_paths,
 )
 
 logger = logging.getLogger("secret_sentinel")
@@ -231,7 +233,7 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse command line arguments.
 
     Args:
@@ -244,7 +246,7 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def parse_args_from(argv: List[str]) -> argparse.Namespace:
+def parse_args_from(argv: list[str]) -> argparse.Namespace:
     """Parse arguments from a specified list.
 
     Args:
@@ -392,7 +394,7 @@ def _get_git_hook_path(repo_root: str, hook_name: str = "pre-commit") -> Path:
     return Path(repo_root) / ".git" / "hooks" / hook_name
 
 
-def run_doctor(repo_root: Optional[str]) -> int:
+def run_doctor(repo_root: str | None) -> int:
     """Report setup health without changing repository files or showing secrets."""
     print("Secret Sentinel doctor")
     if repo_root is None:
@@ -526,7 +528,7 @@ def run_doctor(repo_root: Optional[str]) -> int:
     return 1 if baseline_error else 0
 
 
-def run_pre_push_scan(repo_root: Optional[str], updates: str) -> int:
+def run_pre_push_scan(repo_root: str | None, updates: str) -> int:
     """Scan commits Git is about to push and block pushes with findings."""
     if repo_root is None:
         logger.error("Pre-push scanning must run inside a Git repository.")
@@ -562,9 +564,9 @@ def run_pre_push_scan(repo_root: Optional[str], updates: str) -> int:
 
 
 def run_suppression_audit(
-    repo_root: Optional[str],
+    repo_root: str | None,
     output_format: str = "text",
-    output_path: Optional[str] = None,
+    output_path: str | None = None,
 ) -> int:
     """Report undocumented, expired, or unused inline suppressions."""
     if repo_root is None:
@@ -604,7 +606,7 @@ def run_suppression_audit(
     )
 
 
-def run_setup(repo_root: Optional[str]) -> int:
+def run_setup(repo_root: str | None) -> int:
     """Guide users through common setup choices without making implicit changes."""
     if repo_root is None:
         logger.error("Run `secret-sentinel --setup` from inside a Git repository.")
@@ -663,7 +665,7 @@ def run_setup(repo_root: Optional[str]) -> int:
 
 
 def run_init(
-    repo_root: Optional[str],
+    repo_root: str | None,
     assume_yes: bool = False,
     hook_name: str = "pre-commit",
 ) -> int:
@@ -740,14 +742,14 @@ def run_init(
 
 
 def scan_paths(
-    paths: List[str],
+    paths: list[str],
     no_ai: bool,
     staged: bool,
     debug: bool = False,
-    custom_rules: Optional[List[CustomRule]] = None,
-    diff_base: Optional[str] = None,
-    coverage: Optional[ScanCoverage] = None,
-) -> List[Dict[str, Any]]:
+    custom_rules: list[CustomRule] | None = None,
+    diff_base: str | None = None,
+    coverage: ScanCoverage | None = None,
+) -> list[dict[str, Any]]:
     """Execute secret scan across paths or staged changes, optionally applying AI validation.
 
     Args:
@@ -769,7 +771,7 @@ def scan_paths(
         logger.debug("ignore_globs=%s", ignore_globs)
         logger.debug("ai_enabled=%s", config.ai_enabled)
 
-    issues: List[Dict[str, Any]] = []
+    issues: list[dict[str, Any]] = []
     active_custom_rules = config.custom_rules if custom_rules is None else custom_rules
     if diff_base is not None:
         issues = scan_git_diff(
@@ -796,13 +798,13 @@ def scan_paths(
     if no_ai or not config.ai_enabled or not issues:
         return issues
 
-    issues_by_source: Dict[str, List[Dict[str, Any]]] = {}
+    issues_by_source: dict[str, list[dict[str, Any]]] = {}
     for issue in issues:
         issues_by_source.setdefault(str(issue["source"]), []).append(issue)
 
-    verified: List[Dict[str, Any]] = []
+    verified: list[dict[str, Any]] = []
     for source_path, path_issues in issues_by_source.items():
-        content: Optional[str] = None
+        content: str | None = None
         if staged or (not paths and diff_base is None):
             content = get_staged_content(source_path, repo_root)
         if content is None:
@@ -828,7 +830,7 @@ def scan_paths(
     return verified
 
 
-def main(argv: Optional[List[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     """Main CLI entry point for Secret Sentinel.
 
     Args:

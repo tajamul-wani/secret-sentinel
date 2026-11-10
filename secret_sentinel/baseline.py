@@ -7,7 +7,7 @@ import os
 import re
 import tempfile
 from pathlib import Path
-from typing import Any, Dict, List, Set, Tuple
+from typing import Any
 
 
 class ScanBaseline:
@@ -29,7 +29,7 @@ class ScanBaseline:
             )
         self._key = key.encode("utf-8")
 
-    def fingerprint(self, issue: Dict[str, Any]) -> str:
+    def fingerprint(self, issue: dict[str, Any]) -> str:
         """Create a keyed fingerprint without persisting the detected value."""
         source = issue.get("source")
         matcher = issue.get("matcher")
@@ -43,7 +43,7 @@ class ScanBaseline:
             hashlib.sha256,
         ).hexdigest()
 
-    def load(self) -> Set[str]:
+    def load(self) -> set[str]:
         """Load and validate baseline fingerprints."""
         with self.path.open("r", encoding="utf-8") as handle:
             data = json.load(handle)
@@ -57,7 +57,7 @@ class ScanBaseline:
             raise ValueError("Invalid fingerprint list in baseline.")
         return set(fingerprints)
 
-    def save(self, issues: List[Dict[str, Any]]) -> None:
+    def save(self, issues: list[dict[str, Any]]) -> None:
         """Atomically save issue fingerprints, never raw finding values."""
         fingerprints = sorted({self.fingerprint(issue) for issue in issues})
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -83,7 +83,7 @@ class ScanBaseline:
             if temporary_path and os.path.exists(temporary_path):
                 os.unlink(temporary_path)
 
-    def filter_issues(self, issues: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], int]:
+    def filter_issues(self, issues: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], int]:
         """Return issues absent from the baseline and the number suppressed."""
         fingerprints = self.load()
         new_issues = [

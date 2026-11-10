@@ -82,9 +82,8 @@ class TestScanBaseline(unittest.TestCase):
     def test_baseline_requires_strong_key(self) -> None:
         with unittest.mock.patch.dict(
             "os.environ", {"SECRET_SENTINEL_BASELINE_KEY": "too-short"}
-        ):
-            with self.assertRaisesRegex(ValueError, "must be set to at least 32 bytes"):
-                ScanBaseline(self.temp_dir.name)
+        ), self.assertRaisesRegex(ValueError, "must be set to at least 32 bytes"):
+            ScanBaseline(self.temp_dir.name)
 
 
 if __name__ == "__main__":

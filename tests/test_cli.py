@@ -18,13 +18,14 @@ from secret_sentinel.cli import (
     main,
     parse_args,
     parse_args_from,
-    scan_paths as cli_scan_paths,
     setup_logging,
     uninstall_git_hook,
     uninstall_git_pre_push_hook,
 )
+from secret_sentinel.cli import (
+    scan_paths as cli_scan_paths,
+)
 from secret_sentinel.history import ScanHistory
-
 
 DUMMY_AWS = "AKIA" + "1234567890ABCDEF"
 
@@ -309,10 +310,12 @@ class TestCLI(unittest.TestCase):
 
     def test_main_clean_scan(self) -> None:
         """Main should return 0 when no issues are found."""
-        with patch("secret_sentinel.cli.scan_paths", return_value=[]):
-            with patch("secret_sentinel.cli.get_git_root", return_value=None):
-                exit_code = main(["--no-ai"])
-                self.assertEqual(exit_code, 0)
+        with (
+            patch("secret_sentinel.cli.scan_paths", return_value=[]),
+            patch("secret_sentinel.cli.get_git_root", return_value=None),
+        ):
+            exit_code = main(["--no-ai"])
+            self.assertEqual(exit_code, 0)
 
     def test_main_issues_found(self) -> None:
         """Main should return 1 when secret issues are detected."""
@@ -327,10 +330,12 @@ class TestCLI(unittest.TestCase):
                 "severity": "CRITICAL",
             }
         ]
-        with patch("secret_sentinel.cli.scan_paths", return_value=mock_issues):
-            with patch("secret_sentinel.cli.get_git_root", return_value=None):
-                exit_code = main(["--no-ai"])
-                self.assertEqual(exit_code, 1)
+        with (
+            patch("secret_sentinel.cli.scan_paths", return_value=mock_issues),
+            patch("secret_sentinel.cli.get_git_root", return_value=None),
+        ):
+            exit_code = main(["--no-ai"])
+            self.assertEqual(exit_code, 1)
 
     def test_main_update_baseline_records_findings_without_failing(self) -> None:
         """Baseline initialization records current findings without blocking."""
@@ -344,12 +349,13 @@ class TestCLI(unittest.TestCase):
             "severity": "CRITICAL",
         }
         with tempfile.TemporaryDirectory() as repo_root:
-            with patch.dict(
-                os.environ, {"SECRET_SENTINEL_BASELINE_KEY": "test-key-" + "x" * 32}
+            with (
+                patch.dict(
+        os.environ, {"SECRET_SENTINEL_BASELINE_KEY": "test-key-" + "x" * 32}
+    ), patch("secret_sentinel.cli.get_git_root", return_value=repo_root),
+                patch("secret_sentinel.cli.scan_paths", return_value=[issue]),
             ):
-                with patch("secret_sentinel.cli.get_git_root", return_value=repo_root):
-                    with patch("secret_sentinel.cli.scan_paths", return_value=[issue]):
-                        self.assertEqual(main(["--update-baseline", "--no-ai"]), 0)
+                self.assertEqual(main(["--update-baseline", "--no-ai"]), 0)
             baseline_path = os.path.join(
                 repo_root, ".secret-sentinel", "baseline.json"
             )
@@ -368,14 +374,14 @@ class TestCLI(unittest.TestCase):
             "confidence": "high",
             "severity": "CRITICAL",
         }
-        with tempfile.TemporaryDirectory() as repo_root:
-            with patch.dict(
-                os.environ, {"SECRET_SENTINEL_BASELINE_KEY": "test-key-" + "x" * 32}
-            ):
-                with patch("secret_sentinel.cli.get_git_root", return_value=repo_root):
-                    with patch("secret_sentinel.cli.scan_paths", return_value=[issue]):
-                        self.assertEqual(main(["--update-baseline", "--no-ai"]), 0)
-                        self.assertEqual(main(["--baseline", "--no-ai"]), 0)
+        with (
+            tempfile.TemporaryDirectory() as repo_root, patch.dict(
+        os.environ, {"SECRET_SENTINEL_BASELINE_KEY": "test-key-" + "x" * 32}
+    ), patch("secret_sentinel.cli.get_git_root", return_value=repo_root),
+            patch("secret_sentinel.cli.scan_paths", return_value=[issue]),
+        ):
+            self.assertEqual(main(["--update-baseline", "--no-ai"]), 0)
+            self.assertEqual(main(["--baseline", "--no-ai"]), 0)
 
     def test_main_baseline_reports_new_findings(self) -> None:
         """A finding absent from the baseline still blocks the scan."""
@@ -389,34 +395,32 @@ class TestCLI(unittest.TestCase):
             "severity": "CRITICAL",
         }
         new_issue = dict(original, value="AKIA" + "FEDCBA0987654321")
-        with tempfile.TemporaryDirectory() as repo_root:
-            with patch.dict(
-                os.environ, {"SECRET_SENTINEL_BASELINE_KEY": "test-key-" + "x" * 32}
+        with tempfile.TemporaryDirectory() as repo_root, patch.dict(
+            os.environ, {"SECRET_SENTINEL_BASELINE_KEY": "test-key-" + "x" * 32}
+        ), patch("secret_sentinel.cli.get_git_root", return_value=repo_root):
+            with patch("secret_sentinel.cli.scan_paths", return_value=[original]):
+                self.assertEqual(main(["--update-baseline", "--no-ai"]), 0)
+            with patch(
+                "secret_sentinel.cli.scan_paths",
+                return_value=[original, new_issue],
             ):
-                with patch("secret_sentinel.cli.get_git_root", return_value=repo_root):
-                    with patch("secret_sentinel.cli.scan_paths", return_value=[original]):
-                        self.assertEqual(main(["--update-baseline", "--no-ai"]), 0)
-                    with patch(
-                        "secret_sentinel.cli.scan_paths",
-                        return_value=[original, new_issue],
-                    ):
-                        self.assertEqual(main(["--baseline", "--no-ai"]), 1)
+                self.assertEqual(main(["--baseline", "--no-ai"]), 1)
 
     def test_main_baseline_requires_existing_file(self) -> None:
         """Baseline checks fail with an actionable message when no baseline exists."""
-        with tempfile.TemporaryDirectory() as repo_root:
-            with patch.dict(
-                os.environ, {"SECRET_SENTINEL_BASELINE_KEY": "test-key-" + "x" * 32}
-            ):
-                with patch("secret_sentinel.cli.get_git_root", return_value=repo_root):
-                    self.assertEqual(main(["--baseline", "--no-ai"]), 1)
+        with tempfile.TemporaryDirectory() as repo_root, patch.dict(
+            os.environ, {"SECRET_SENTINEL_BASELINE_KEY": "test-key-" + "x" * 32}
+        ), patch("secret_sentinel.cli.get_git_root", return_value=repo_root):
+            self.assertEqual(main(["--baseline", "--no-ai"]), 1)
 
     def test_main_baseline_requires_key(self) -> None:
         """Baseline operations fail clearly when the key is not configured."""
-        with tempfile.TemporaryDirectory() as repo_root:
-            with patch.dict(os.environ, {"SECRET_SENTINEL_BASELINE_KEY": ""}):
-                with patch("secret_sentinel.cli.get_git_root", return_value=repo_root):
-                    self.assertEqual(main(["--baseline", "--no-ai"]), 1)
+        with (
+            tempfile.TemporaryDirectory() as repo_root,
+            patch.dict(os.environ, {"SECRET_SENTINEL_BASELINE_KEY": ""}),
+            patch("secret_sentinel.cli.get_git_root", return_value=repo_root),
+        ):
+            self.assertEqual(main(["--baseline", "--no-ai"]), 1)
 
     def test_main_baseline_rejects_non_scan_options(self) -> None:
         """Baseline modes should not be silently ignored by other CLI commands."""
@@ -436,10 +440,12 @@ class TestCLI(unittest.TestCase):
         }
         with tempfile.TemporaryDirectory() as repo_root:
             history = ScanHistory(repo_root)
-            with patch("secret_sentinel.cli.get_git_root", return_value=repo_root):
-                with patch("secret_sentinel.cli.scan_git_history", return_value=[issue]) as scan:
-                    self.assertEqual(main(["--git-history", "--format", "json"]), 1)
-                    scan.assert_called_once()
+            with (
+                patch("secret_sentinel.cli.get_git_root", return_value=repo_root),
+                patch("secret_sentinel.cli.scan_git_history", return_value=[issue]) as scan,
+            ):
+                self.assertEqual(main(["--git-history", "--format", "json"]), 1)
+                scan.assert_called_once()
             records = history.get_history()
 
         self.assertEqual(records[0]["scan_type"], "git-history")
@@ -453,12 +459,14 @@ class TestCLI(unittest.TestCase):
     def test_main_git_history_forwards_all_refs_option(self) -> None:
         """The CLI should pass all-refs mode to the history scanner."""
         with tempfile.TemporaryDirectory() as repo_root:
-            with patch("secret_sentinel.cli.get_git_root", return_value=repo_root):
-                with patch("secret_sentinel.cli.scan_git_history", return_value=[]) as scan:
-                    self.assertEqual(
-                        main(["--git-history", "--all-refs", "--no-ai"]),
-                        0,
-                    )
+            with (
+                patch("secret_sentinel.cli.get_git_root", return_value=repo_root),
+                patch("secret_sentinel.cli.scan_git_history", return_value=[]) as scan,
+            ):
+                self.assertEqual(
+                    main(["--git-history", "--all-refs", "--no-ai"]),
+                    0,
+                )
             self.assertTrue(scan.call_args.kwargs["all_refs"])
 
     def test_main_git_history_scan_rejects_paths_and_staged(self) -> None:
@@ -474,9 +482,11 @@ class TestCLI(unittest.TestCase):
 
     def test_main_diff_forwards_base_and_custom_rules(self) -> None:
         with tempfile.TemporaryDirectory() as repo_root:
-            with patch("secret_sentinel.cli.get_git_root", return_value=repo_root):
-                with patch("secret_sentinel.cli.scan_paths", return_value=[]) as scan:
-                    self.assertEqual(main(["--diff", "HEAD~1", "--no-ai"]), 0)
+            with (
+                patch("secret_sentinel.cli.get_git_root", return_value=repo_root),
+                patch("secret_sentinel.cli.scan_paths", return_value=[]) as scan,
+            ):
+                self.assertEqual(main(["--diff", "HEAD~1", "--no-ai"]), 0)
             self.assertEqual(scan.call_args.kwargs["diff_base"], "HEAD~1")
 
     def test_main_commit_range_forwards_revisions_and_records_history(self) -> None:
@@ -493,15 +503,17 @@ class TestCLI(unittest.TestCase):
         }
         with tempfile.TemporaryDirectory() as repo_root:
             history = ScanHistory(repo_root)
-            with patch("secret_sentinel.cli.get_git_root", return_value=repo_root):
-                with patch(
-                    "secret_sentinel.cli.scan_git_commit_range",
-                    return_value=[issue],
-                ) as scan:
-                    self.assertEqual(
-                        main(["--commit-range", "origin/main", "HEAD", "--no-ai"]),
-                        1,
-                    )
+            with (
+                patch("secret_sentinel.cli.get_git_root", return_value=repo_root),
+                patch(
+            "secret_sentinel.cli.scan_git_commit_range",
+            return_value=[issue],
+        ) as scan,
+            ):
+                self.assertEqual(
+                    main(["--commit-range", "origin/main", "HEAD", "--no-ai"]),
+                    1,
+                )
 
             scan.assert_called_once()
             self.assertEqual(scan.call_args.args[1:3], ("origin/main", "HEAD"))
@@ -544,13 +556,15 @@ class TestCLI(unittest.TestCase):
 
     def test_main_git_history_scan_reports_errors(self) -> None:
         """History scan errors should fail explicitly with a generic message."""
-        with tempfile.TemporaryDirectory() as repo_root:
-            with patch("secret_sentinel.cli.get_git_root", return_value=repo_root):
-                with patch(
-                    "secret_sentinel.cli.scan_git_history",
-                    side_effect=RuntimeError("internal detail"),
-                ):
-                    self.assertEqual(main(["--git-history"]), 1)
+        with (
+            tempfile.TemporaryDirectory() as repo_root,
+            patch("secret_sentinel.cli.get_git_root", return_value=repo_root),
+            patch(
+            "secret_sentinel.cli.scan_git_history",
+            side_effect=RuntimeError("internal detail"),
+        ),
+        ):
+            self.assertEqual(main(["--git-history"]), 1)
 
     def test_main_history_and_stats_with_data(self) -> None:
         """Test history and statistics CLI commands when records exist."""
@@ -620,18 +634,18 @@ class TestCLI(unittest.TestCase):
     ) -> None:
         """A failure to persist the scan result prevents the push."""
         output = StringIO()
-        with tempfile.TemporaryDirectory() as repo_root:
-            with (
-                patch("secret_sentinel.cli.get_git_root", return_value=repo_root),
-                patch("secret_sentinel.cli.sys.stdin", StringIO("")),
-                patch("secret_sentinel.cli.scan_git_push_updates", return_value=[]),
-                patch(
-                    "secret_sentinel.cli.ScanHistory.record_scan",
-                    side_effect=OSError("storage unavailable"),
-                ),
-                redirect_stdout(output),
-            ):
-                self.assertEqual(main(["--pre-push"]), 1)
+        with (
+            tempfile.TemporaryDirectory() as repo_root,
+            patch("secret_sentinel.cli.get_git_root", return_value=repo_root),
+            patch("secret_sentinel.cli.sys.stdin", StringIO("")),
+            patch("secret_sentinel.cli.scan_git_push_updates", return_value=[]),
+            patch(
+                "secret_sentinel.cli.ScanHistory.record_scan",
+                side_effect=OSError("storage unavailable"),
+            ),
+            redirect_stdout(output),
+        ):
+            self.assertEqual(main(["--pre-push"]), 1)
 
         self.assertIn("could not record history", output.getvalue())
 
@@ -650,9 +664,11 @@ class TestCLI(unittest.TestCase):
     def test_main_doctor_reports_missing_repository(self) -> None:
         """Doctor should explain when it is run outside a Git repository."""
         output = StringIO()
-        with patch("secret_sentinel.cli.get_git_root", return_value=None):
-            with redirect_stdout(output):
-                self.assertEqual(main(["--doctor"]), 1)
+        with (
+            patch("secret_sentinel.cli.get_git_root", return_value=None),
+            redirect_stdout(output),
+        ):
+            self.assertEqual(main(["--doctor"]), 1)
         self.assertIn("Git repository: not found", output.getvalue())
 
     def test_main_audit_suppressions_reports_clean_directive_without_leaking(self) -> None:
@@ -699,12 +715,12 @@ class TestCLI(unittest.TestCase):
 
     def test_main_audit_suppressions_reports_empty_repository(self) -> None:
         """An audit with no directives succeeds with a clear message."""
-        with tempfile.TemporaryDirectory() as repo_root:
-            with (
-                patch("secret_sentinel.cli.get_git_root", return_value=repo_root),
-                redirect_stdout(StringIO()) as output,
-            ):
-                self.assertEqual(main(["--audit-suppressions"]), 0)
+        with (
+            tempfile.TemporaryDirectory() as repo_root,
+            patch("secret_sentinel.cli.get_git_root", return_value=repo_root),
+            redirect_stdout(StringIO()) as output,
+        ):
+            self.assertEqual(main(["--audit-suppressions"]), 0)
         self.assertIn("No inline suppression directives found.", output.getvalue())
 
     def test_main_audit_suppressions_supports_json_and_sarif_output(self) -> None:
@@ -764,23 +780,23 @@ class TestCLI(unittest.TestCase):
 
     def test_main_audit_suppressions_reports_output_file_errors(self) -> None:
         """An unwritable report path should fail explicitly."""
-        with tempfile.TemporaryDirectory() as repo_root:
-            with (
-                patch("secret_sentinel.cli.get_git_root", return_value=repo_root),
-                redirect_stdout(StringIO()),
-            ):
-                self.assertEqual(
-                    main(
-                        [
-                            "--audit-suppressions",
-                            "--format",
-                            "json",
-                            "--output",
-                            os.path.join(repo_root, "missing", "report.json"),
-                        ]
-                    ),
-                    1,
-                )
+        with (
+            tempfile.TemporaryDirectory() as repo_root,
+            patch("secret_sentinel.cli.get_git_root", return_value=repo_root),
+            redirect_stdout(StringIO()),
+        ):
+            self.assertEqual(
+                main(
+                    [
+                        "--audit-suppressions",
+                        "--format",
+                        "json",
+                        "--output",
+                        os.path.join(repo_root, "missing", "report.json"),
+                    ]
+                ),
+                1,
+            )
 
     def test_main_audit_suppressions_rejects_other_modes(self) -> None:
         """Suppression audit cannot silently ignore another command's options."""
@@ -798,9 +814,11 @@ class TestCLI(unittest.TestCase):
         with tempfile.TemporaryDirectory() as repo_root:
             os.makedirs(os.path.join(repo_root, ".git", "hooks"))
             output = StringIO()
-            with patch("secret_sentinel.cli.get_git_root", return_value=repo_root):
-                with redirect_stdout(output):
-                    self.assertEqual(main(["--doctor"]), 0)
+            with (
+                patch("secret_sentinel.cli.get_git_root", return_value=repo_root),
+                redirect_stdout(output),
+            ):
+                self.assertEqual(main(["--doctor"]), 0)
             report = output.getvalue()
             self.assertIn("Configuration: defaults active", report)
             self.assertIn("Pre-commit hook: not installed (optional)", report)
@@ -1165,9 +1183,11 @@ class TestCLI(unittest.TestCase):
             with open(os.path.join(repo_root, ".secret-sentinel.ini"), "w", encoding="utf-8") as handle:
                 handle.write("[custom_rules]\nBroken = HIGH | [\n")
             output = StringIO()
-            with patch("secret_sentinel.cli.get_git_root", return_value=repo_root):
-                with redirect_stdout(output):
-                    self.assertEqual(main(["--doctor"]), 1)
+            with (
+                patch("secret_sentinel.cli.get_git_root", return_value=repo_root),
+                redirect_stdout(output),
+            ):
+                self.assertEqual(main(["--doctor"]), 1)
             self.assertIn("Configuration: could not be loaded", output.getvalue())
             self.assertNotIn("HIGH | [", output.getvalue())
 
@@ -1176,10 +1196,12 @@ class TestCLI(unittest.TestCase):
         with tempfile.TemporaryDirectory() as repo_root:
             hooks_dir = os.path.join(repo_root, ".git", "hooks")
             os.makedirs(hooks_dir)
-            with patch("secret_sentinel.cli.get_git_root", return_value=repo_root):
-                with patch("secret_sentinel.cli.sys.stdin") as stdin:
-                    stdin.isatty.return_value = False
-                    self.assertEqual(main(["--init"]), 2)
+            with (
+                patch("secret_sentinel.cli.get_git_root", return_value=repo_root),
+                patch("secret_sentinel.cli.sys.stdin") as stdin,
+            ):
+                stdin.isatty.return_value = False
+                self.assertEqual(main(["--init"]), 2)
             self.assertFalse(os.path.exists(os.path.join(hooks_dir, "pre-commit")))
 
     def test_main_init_installs_hook_after_confirmation(self) -> None:
@@ -1299,20 +1321,24 @@ class TestCLI(unittest.TestCase):
             with open(secret_file, "w", encoding="utf-8") as f:
                 f.write(f'key = "{DUMMY_AWS}"\n')
 
-            with patch("secret_sentinel.cli.get_git_root", return_value=tmpdir):
-                with patch(
-                    "secret_sentinel.cli.validate_issues",
-                    return_value=[],
-                ) as validate:
-                    issues = cli_scan_paths([secret_file], no_ai=False, staged=False, debug=False)
-                    self.assertEqual(issues, [])
-                    self.assertTrue(validate.call_args.kwargs["allow_cloud"])
+            with (
+                patch("secret_sentinel.cli.get_git_root", return_value=tmpdir),
+                patch(
+            "secret_sentinel.cli.validate_issues",
+            return_value=[],
+        ) as validate,
+            ):
+                issues = cli_scan_paths([secret_file], no_ai=False, staged=False, debug=False)
+                self.assertEqual(issues, [])
+                self.assertTrue(validate.call_args.kwargs["allow_cloud"])
 
     def test_main_format_json(self) -> None:
         """Main with --format json should return exit code 0 when clean."""
-        with patch("secret_sentinel.cli.scan_paths", return_value=[]):
-            with patch("secret_sentinel.cli.get_git_root", return_value=None):
-                self.assertEqual(main(["--format", "json", "--no-ai"]), 0)
+        with (
+            patch("secret_sentinel.cli.scan_paths", return_value=[]),
+            patch("secret_sentinel.cli.get_git_root", return_value=None),
+        ):
+            self.assertEqual(main(["--format", "json", "--no-ai"]), 0)
 
     def test_main_coverage_requires_explicit_disk_paths(self) -> None:
         """Coverage mode rejects implicit staged scans."""
@@ -1328,11 +1354,13 @@ class TestCLI(unittest.TestCase):
                 handle.write(b"\x00binary")
 
             output = StringIO()
-            with redirect_stdout(output):
-                with patch("secret_sentinel.cli.get_git_root", return_value=repo_root):
-                    result = main(
-                        [repo_root, "--coverage", "--no-ai", "--format", "json"]
-                    )
+            with (
+                redirect_stdout(output),
+                patch("secret_sentinel.cli.get_git_root", return_value=repo_root),
+            ):
+                result = main(
+                    [repo_root, "--coverage", "--no-ai", "--format", "json"]
+                )
 
         report = json.loads(output.getvalue())
         self.assertEqual(result, 0)
@@ -1411,17 +1439,21 @@ class TestCLI(unittest.TestCase):
 
     def test_main_format_sarif(self) -> None:
         """Main with --format sarif should return exit code 0 when clean."""
-        with patch("secret_sentinel.cli.scan_paths", return_value=[]):
-            with patch("secret_sentinel.cli.get_git_root", return_value=None):
-                self.assertEqual(main(["--format", "sarif", "--no-ai"]), 0)
+        with (
+            patch("secret_sentinel.cli.scan_paths", return_value=[]),
+            patch("secret_sentinel.cli.get_git_root", return_value=None),
+        ):
+            self.assertEqual(main(["--format", "sarif", "--no-ai"]), 0)
 
     def test_main_output_to_file(self) -> None:
         """Main with --output should write report to target file."""
         with tempfile.TemporaryDirectory() as tmpdir:
             output_file = os.path.join(tmpdir, "report.json")
-            with patch("secret_sentinel.cli.scan_paths", return_value=[]):
-                with patch("secret_sentinel.cli.get_git_root", return_value=None):
-                    self.assertEqual(main(["--format", "json", "--output", output_file]), 0)
+            with (
+                patch("secret_sentinel.cli.scan_paths", return_value=[]),
+                patch("secret_sentinel.cli.get_git_root", return_value=None),
+            ):
+                self.assertEqual(main(["--format", "json", "--output", output_file]), 0)
             self.assertTrue(os.path.exists(output_file))
 
     def test_main_fail_on_threshold_allows(self) -> None:
@@ -1437,9 +1469,11 @@ class TestCLI(unittest.TestCase):
                 "severity": "MEDIUM",
             }
         ]
-        with patch("secret_sentinel.cli.scan_paths", return_value=mock_medium_issue):
-            with patch("secret_sentinel.cli.get_git_root", return_value=None):
-                self.assertEqual(main(["--fail-on", "HIGH", "--no-ai"]), 0)
+        with (
+            patch("secret_sentinel.cli.scan_paths", return_value=mock_medium_issue),
+            patch("secret_sentinel.cli.get_git_root", return_value=None),
+        ):
+            self.assertEqual(main(["--fail-on", "HIGH", "--no-ai"]), 0)
 
     def test_main_fail_on_threshold_blocks(self) -> None:
         """Issues meeting or exceeding fail-on threshold should block commit (exit code 1)."""
@@ -1454,9 +1488,11 @@ class TestCLI(unittest.TestCase):
                 "severity": "CRITICAL",
             }
         ]
-        with patch("secret_sentinel.cli.scan_paths", return_value=mock_critical_issue):
-            with patch("secret_sentinel.cli.get_git_root", return_value=None):
-                self.assertEqual(main(["--fail-on", "HIGH", "--no-ai"]), 1)
+        with (
+            patch("secret_sentinel.cli.scan_paths", return_value=mock_critical_issue),
+            patch("secret_sentinel.cli.get_git_root", return_value=None),
+        ):
+            self.assertEqual(main(["--fail-on", "HIGH", "--no-ai"]), 1)
 
 
 if __name__ == "__main__":

@@ -9,11 +9,11 @@ import subprocess
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
-from typing import Dict, List, Optional, Any
+from typing import Any
 
 from .config import DEFAULT_IGNORE, CustomRule
-from .utils import is_text_bytes, sanitize_snippet, shannon_entropy
 from .risk_scoring import get_risk_score
+from .utils import is_text_bytes, sanitize_snippet, shannon_entropy
 
 RULE_PACK_VERSION = "3"
 # Larger files are skipped and reported so a hook cannot stall on build output.
@@ -130,7 +130,7 @@ class ScanCoverage:
     missing_paths: int = 0
     oversized_files: int = 0
 
-    def as_dict(self) -> Dict[str, int]:
+    def as_dict(self) -> dict[str, int]:
         """Return coverage counts in a serialization-friendly form."""
         return {
             "scanned_files": self.scanned_files,
@@ -152,7 +152,7 @@ def _is_oversized(size: int, source: str) -> bool:
     return True
 
 
-def _run_git_command(args: List[str], cwd: Optional[str] = None, text: bool = True) -> subprocess.CompletedProcess:
+def _run_git_command(args: list[str], cwd: str | None = None, text: bool = True) -> subprocess.CompletedProcess:
     """Execute a git command with subprocess.
 
     Args:
@@ -172,7 +172,7 @@ def _run_git_command(args: List[str], cwd: Optional[str] = None, text: bool = Tr
     )
 
 
-def get_git_root() -> Optional[str]:
+def get_git_root() -> str | None:
     """Retrieve the top-level directory of the current Git repository.
 
     Returns:
@@ -184,7 +184,7 @@ def get_git_root() -> Optional[str]:
     return result.stdout.strip()
 
 
-def get_staged_paths(repo_root: Optional[str] = None) -> List[str]:
+def get_staged_paths(repo_root: str | None = None) -> list[str]:
     """List paths for staged files whose contents can be scanned.
 
     Args:
@@ -214,7 +214,7 @@ def get_staged_paths(repo_root: Optional[str] = None) -> List[str]:
     ]
 
 
-def get_staged_content(path: str, repo_root: Optional[str] = None) -> Optional[str]:
+def get_staged_content(path: str, repo_root: str | None = None) -> str | None:
     """Fetch text content of a staged file from the Git index.
 
     Args:
@@ -258,7 +258,7 @@ def _has_symlink_component(path: str) -> bool:
     )
 
 
-def _sanitize_source_path(path: str, repo_root: Optional[str] = None) -> str:
+def _sanitize_source_path(path: str, repo_root: str | None = None) -> str:
     """Convert absolute paths to repo-relative paths to avoid leaking system paths.
 
     Args:
@@ -278,7 +278,7 @@ def _sanitize_source_path(path: str, repo_root: Optional[str] = None) -> str:
     return _normalize_path(path)
 
 
-def _is_ignored(path: str, ignore_globs: List[str], repo_root: Optional[str] = None) -> bool:
+def _is_ignored(path: str, ignore_globs: list[str], repo_root: str | None = None) -> bool:
     """Check whether a path matches any pattern in ignore_globs.
 
     Args:
@@ -338,10 +338,10 @@ def _scan_line(
     line: str,
     lineno: int,
     source: str,
-    custom_rules: Optional[List[CustomRule]] = None,
-) -> List[Dict[str, Any]]:
+    custom_rules: list[CustomRule] | None = None,
+) -> list[dict[str, Any]]:
     """Return unsuppressed detector matches found on one source line."""
-    issues: List[Dict[str, Any]] = []
+    issues: list[dict[str, Any]] = []
     source_path = Path(source)
     if source_path.name == ".netrc":
         for match in NETRC_PASSWORD_PATTERN.finditer(line):
@@ -497,7 +497,7 @@ def _build_issue(
     line: str,
     matcher: str,
     value: str,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Build a standard pattern finding."""
     severity = get_risk_score(matcher)
     return {
@@ -515,8 +515,8 @@ def _build_issue(
 def scan_text(
     content: str,
     source: str,
-    custom_rules: Optional[List[CustomRule]] = None,
-) -> List[Dict[str, Any]]:
+    custom_rules: list[CustomRule] | None = None,
+) -> list[dict[str, Any]]:
     """Scan string content for known secret patterns and high-entropy strings.
 
     Supports inline and next-line suppressions, optionally with an expiry date.
@@ -623,8 +623,8 @@ def scan_text(
 def audit_suppressions_text(
     content: str,
     source: str,
-    custom_rules: Optional[List[CustomRule]] = None,
-) -> List[Dict[str, Any]]:
+    custom_rules: list[CustomRule] | None = None,
+) -> list[dict[str, Any]]:
     """Audit suppression directives without returning source or finding values.
 
     Args:
@@ -635,7 +635,7 @@ def audit_suppressions_text(
     Returns:
         Suppression records containing only location, target line, and statuses.
     """
-    suppressions: List[Dict[str, Any]] = []
+    suppressions: list[dict[str, Any]] = []
     lines = content.splitlines()
     for lineno, line in enumerate(lines, start=1):
         directive = SUPPRESSION_DIRECTIVE_PATTERN.search(line)
@@ -646,7 +646,7 @@ def audit_suppressions_text(
         action = directive.group("action").lower()
         target_line = lineno if action == "ignore" else lineno + 1
         target_exists = target_line <= len(lines)
-        statuses: List[str] = []
+        statuses: list[str] = []
         if not _suppression_has_reason(metadata):
             statuses.append("missing-reason")
 
@@ -684,9 +684,9 @@ def audit_suppressions_text(
 
 def audit_suppressions_in_repo(
     repo_root: str,
-    ignore_globs: Optional[List[str]] = None,
-    custom_rules: Optional[List[CustomRule]] = None,
-) -> List[Dict[str, Any]]:
+    ignore_globs: list[str] | None = None,
+    custom_rules: list[CustomRule] | None = None,
+) -> list[dict[str, Any]]:
     """Audit inline suppressions in readable text files under a repository root.
 
     Args:
@@ -706,7 +706,7 @@ def audit_suppressions_in_repo(
         raise ValueError("A repository directory is required.")
 
     active_ignores = DEFAULT_IGNORE if ignore_globs is None else ignore_globs
-    suppressions: List[Dict[str, Any]] = []
+    suppressions: list[dict[str, Any]] = []
     for current_root, dirs, file_names in os.walk(root_path, followlinks=False):
         dirs.sort()
         file_names.sort()
@@ -740,10 +740,10 @@ def audit_suppressions_in_repo(
 
 
 def scan_staged_files(
-    ignore_globs: Optional[List[str]] = None,
-    repo_root: Optional[str] = None,
-    custom_rules: Optional[List[CustomRule]] = None,
-) -> List[Dict[str, Any]]:
+    ignore_globs: list[str] | None = None,
+    repo_root: str | None = None,
+    custom_rules: list[CustomRule] | None = None,
+) -> list[dict[str, Any]]:
     """Scan all files currently staged in Git index.
 
     Args:
@@ -770,10 +770,10 @@ def scan_staged_files(
 
 def scan_git_history(
     repo_root: str,
-    ignore_globs: Optional[List[str]] = None,
+    ignore_globs: list[str] | None = None,
     all_refs: bool = False,
-    custom_rules: Optional[List[CustomRule]] = None,
-) -> List[Dict[str, Any]]:
+    custom_rules: list[CustomRule] | None = None,
+) -> list[dict[str, Any]]:
     """Scan text blobs reachable from HEAD or all refs and report each finding once.
 
     Findings are attributed to the earliest commit in which their path and
@@ -798,9 +798,9 @@ def scan_git_history(
 def scan_git_push_updates(
     repo_root: str,
     updates: str,
-    ignore_globs: Optional[List[str]] = None,
-    custom_rules: Optional[List[CustomRule]] = None,
-) -> List[Dict[str, Any]]:
+    ignore_globs: list[str] | None = None,
+    custom_rules: list[CustomRule] | None = None,
+) -> list[dict[str, Any]]:
     """Scan commits introduced by Git pre-push ref updates.
 
     Args:
@@ -817,7 +817,7 @@ def scan_git_push_updates(
     """
     zero_sha_by_length = {"0" * 40, "0" * 64}
     commit_pattern = re.compile(r"^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$")
-    commits: List[str] = []
+    commits: list[str] = []
     seen_commits: set[str] = set()
 
     for update in updates.splitlines():
@@ -863,9 +863,9 @@ def scan_git_commit_range(
     repo_root: str,
     base: str,
     head: str,
-    ignore_globs: Optional[List[str]] = None,
-    custom_rules: Optional[List[CustomRule]] = None,
-) -> List[Dict[str, Any]]:
+    ignore_globs: list[str] | None = None,
+    custom_rules: list[CustomRule] | None = None,
+) -> list[dict[str, Any]]:
     """Scan commits after base through head, including findings later removed.
 
     Findings already present in the base snapshot are excluded for files
@@ -874,7 +874,7 @@ def scan_git_commit_range(
     if not base or base.startswith("-") or not head or head.startswith("-"):
         raise ValueError("Valid base and head commits or refs are required.")
 
-    resolved: List[str] = []
+    resolved: list[str] = []
     for revision in (base, head):
         result = _run_git_command(
             [
@@ -954,15 +954,15 @@ def scan_git_commit_range(
 
 def _scan_git_commits(
     repo_root: str,
-    commits: List[str],
-    ignore_globs: Optional[List[str]] = None,
-    custom_rules: Optional[List[CustomRule]] = None,
-    excluded_findings: Optional[set[tuple[str, str, str]]] = None,
-) -> List[Dict[str, Any]]:
+    commits: list[str],
+    ignore_globs: list[str] | None = None,
+    custom_rules: list[CustomRule] | None = None,
+    excluded_findings: set[tuple[str, str, str]] | None = None,
+) -> list[dict[str, Any]]:
     """Scan changed blobs in a parent-before-child commit sequence."""
     active_ignores = DEFAULT_IGNORE if ignore_globs is None else ignore_globs
     seen_findings: set[tuple[str, str, str]] = set()
-    issues: List[Dict[str, Any]] = []
+    issues: list[dict[str, Any]] = []
 
     for commit in commits:
         changed_result = _run_git_command(
@@ -1009,9 +1009,9 @@ def _scan_git_tree_paths(
     repo_root: str,
     commit: str,
     paths: set[str],
-    ignore_globs: Optional[List[str]] = None,
-    custom_rules: Optional[List[CustomRule]] = None,
-) -> List[Dict[str, Any]]:
+    ignore_globs: list[str] | None = None,
+    custom_rules: list[CustomRule] | None = None,
+) -> list[dict[str, Any]]:
     """Scan selected text blobs in a Git commit snapshot."""
     if not paths:
         return []
@@ -1034,7 +1034,7 @@ def _scan_git_tree_paths(
         raise RuntimeError("Unable to read repository history for scanning.")
 
     active_ignores = DEFAULT_IGNORE if ignore_globs is None else ignore_globs
-    blobs: List[tuple[str, str]] = []
+    blobs: list[tuple[str, str]] = []
     for entry in tree_result.stdout.split(b"\0"):
         if not entry:
             continue
@@ -1046,7 +1046,7 @@ def _scan_git_tree_paths(
         if not _is_ignored(absolute_path, active_ignores, repo_root):
             blobs.append((absolute_path, blob_oid))
 
-    issues: List[Dict[str, Any]] = []
+    issues: list[dict[str, Any]] = []
     for (absolute_path, _oid), data in zip(blobs, _read_git_blobs(repo_root, blobs)):
         source = _sanitize_source_path(absolute_path, repo_root)
         if _is_oversized(len(data), source) or not is_text_bytes(data):
@@ -1056,7 +1056,7 @@ def _scan_git_tree_paths(
     return issues
 
 
-def _read_git_blobs(repo_root: str, blobs: List[tuple[str, str]]) -> List[bytes]:
+def _read_git_blobs(repo_root: str, blobs: list[tuple[str, str]]) -> list[bytes]:
     """Read blob contents with one `git cat-file --batch` process."""
     if not blobs:
         return []
@@ -1070,7 +1070,7 @@ def _read_git_blobs(repo_root: str, blobs: List[tuple[str, str]]) -> List[bytes]
     if result.returncode != 0:
         raise RuntimeError("Unable to read repository history for scanning.")
 
-    contents: List[bytes] = []
+    contents: list[bytes] = []
     output = result.stdout
     offset = 0
     for _path, oid in blobs:
@@ -1088,9 +1088,9 @@ def _read_git_blobs(repo_root: str, blobs: List[tuple[str, str]]) -> List[bytes]
 def scan_git_diff(
     base: str,
     repo_root: str,
-    ignore_globs: Optional[List[str]] = None,
-    custom_rules: Optional[List[CustomRule]] = None,
-) -> List[Dict[str, Any]]:
+    ignore_globs: list[str] | None = None,
+    custom_rules: list[CustomRule] | None = None,
+) -> list[dict[str, Any]]:
     """Scan only added lines in the working tree diff against a Git commit."""
     if not base or base.startswith("-"):
         raise ValueError("A valid base commit or ref is required for diff scanning.")
@@ -1112,7 +1112,7 @@ def scan_git_diff(
         raise RuntimeError("Unable to list changed files for diff scanning.")
 
     active_ignores = DEFAULT_IGNORE if ignore_globs is None else ignore_globs
-    issues: List[Dict[str, Any]] = []
+    issues: list[dict[str, Any]] = []
     for raw_path in paths_result.stdout.split(b"\0"):
         if not raw_path:
             continue
@@ -1172,12 +1172,12 @@ def scan_git_diff(
 
 
 def scan_paths(
-    paths: List[str],
-    ignore_globs: Optional[List[str]] = None,
-    repo_root: Optional[str] = None,
-    custom_rules: Optional[List[CustomRule]] = None,
-    coverage: Optional[ScanCoverage] = None,
-) -> List[Dict[str, Any]]:
+    paths: list[str],
+    ignore_globs: list[str] | None = None,
+    repo_root: str | None = None,
+    custom_rules: list[CustomRule] | None = None,
+    coverage: ScanCoverage | None = None,
+) -> list[dict[str, Any]]:
     """Scan specified file and directory paths on disk.
 
     Args:
@@ -1287,7 +1287,7 @@ def scan_paths(
     return issues
 
 
-def summarize_issues(issues: List[Dict[str, Any]]) -> str:
+def summarize_issues(issues: list[dict[str, Any]]) -> str:
     """Generate a sanitized, human-readable summary of detected issues.
 
     Secret values in snippets are sanitized and redacted to prevent leaking
