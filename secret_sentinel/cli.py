@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from . import __version__
 from .ai_validator import validate_issues
 from .baseline import ScanBaseline
 from .config import CustomRule, SecretSentinelConfig
@@ -225,7 +226,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--version",
         action="version",
-        version="secret-sentinel 0.1.0",
+        version=f"secret-sentinel {__version__}",
     )
     return parser
 

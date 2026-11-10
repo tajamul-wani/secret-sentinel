@@ -1,14 +1,14 @@
 [project]
 name = "secret-sentinel"
-version = "0.1.0"
-description = "Local AI-assisted secret scanner for Git pre-commit hooks."
+dynamic = ["version"]
+description = "Local secret scanner for Git repositories, hooks, and CI."
 authors = [
   {name = "Tajamul Wani"}
 ]
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
-keywords = ["secret", "scanner", "git", "pre-commit", "security", "ai"]
+keywords = ["secret", "scanner", "git", "pre-commit", "security"]
 classifiers = [
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.10",
@@ -29,6 +29,15 @@ dev = [
 
 [project.scripts]
 secret-sentinel = "secret_sentinel.cli:main"
+
+[project.urls]
+Source = "https://github.com/tajamul-wani/secret-sentinel"
+
+[tool.setuptools.dynamic]
+version = {attr = "secret_sentinel.__version__"}
+
+[tool.setuptools.packages.find]
+include = ["secret_sentinel*"]
 
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]
