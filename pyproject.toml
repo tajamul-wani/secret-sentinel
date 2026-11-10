@@ -1,5 +1,5 @@
 [project]
-name = "secret-sentinel"
+name = "git-secret-sentinel"
 dynamic = ["version"]
 description = "Local secret scanner for Git repositories, hooks, and CI."
 authors = [

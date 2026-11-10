@@ -25,14 +25,17 @@ in files, staged changes, and commit history before they reach a remote.
 ## Install
 
 ```bash
-pipx install secret-sentinel
+pipx install git-secret-sentinel
 ```
 
 Or with pip:
 
 ```bash
-python -m pip install secret-sentinel
+python -m pip install git-secret-sentinel
 ```
+
+The package is named `git-secret-sentinel`; the command it installs is
+`secret-sentinel`.
 
 ## Quick start
 
@@ -271,14 +274,6 @@ python tests/run_coverage.py
 ```
 
 The coverage check fails below 80%.
-
-To release a new version:
-
-1. Update `__version__` in `secret_sentinel/__init__.py`.
-2. Push a tag that matches it, for example `v0.2.0`.
-
-The release workflow tests, builds, and publishes to PyPI, then creates a
-GitHub release.
 
 ## License
 
