@@ -146,9 +146,9 @@ def _is_oversized(size: int, source: str) -> bool:
     """Return whether content exceeds the scan size limit, logging the skip."""
     if size <= MAX_FILE_BYTES:
         return False
-    logger.warning(
-        "Skipped %s: larger than %d MB.", _normalize_path(source), MAX_FILE_BYTES // (1024 * 1024)
-    )
+    limit_mb = MAX_FILE_BYTES // (1024 * 1024)
+    logger.warning("Skipped a file larger than %d MB.", limit_mb)
+    logger.debug("Skipped oversized file: %s", _normalize_path(source))
     return True
 
 

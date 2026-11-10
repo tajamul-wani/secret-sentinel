@@ -1198,10 +1198,13 @@ class TestRulePackThree(unittest.TestCase):
             with open(path, "w", encoding="utf-8") as handle:
                 handle.write(f'token = "ghp_{self.BODY}"\n')
             coverage = ScanCoverage()
-            with patch("secret_sentinel.scanner.MAX_FILE_BYTES", 10):
-                with self.assertLogs("secret_sentinel", level="WARNING"):
-                    issues = scan_paths([tmpdir], repo_root=tmpdir, coverage=coverage)
+            with (
+                patch("secret_sentinel.scanner.MAX_FILE_BYTES", 10),
+                self.assertLogs("secret_sentinel", level="WARNING") as logs,
+            ):
+                issues = scan_paths([tmpdir], repo_root=tmpdir, coverage=coverage)
         self.assertEqual(issues, [])
+        self.assertNotIn("big.txt", "\n".join(logs.output))
         self.assertEqual(coverage.oversized_files, 1)
         self.assertEqual(coverage.scanned_files, 0)
 
