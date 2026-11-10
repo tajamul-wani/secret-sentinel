@@ -20,9 +20,7 @@ htmlcov/
 *.log
 .DS_Store
 Thumbs.db
-.vscode/*
-!.vscode/tasks.json
-!run_secret_sentinel.ps1
+.vscode/
 PROJECT_PROTOCOL.md
 .idea/
 .secret-sentinel/
