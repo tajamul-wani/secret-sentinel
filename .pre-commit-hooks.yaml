@@ -3,6 +3,7 @@
   description: Local secret scanner for Git repositories
   entry: secret-sentinel
   args: ["--staged", "--no-ai"]
+  pass_filenames: false
   language: python
   types: [text]
   stages: [pre-commit]
