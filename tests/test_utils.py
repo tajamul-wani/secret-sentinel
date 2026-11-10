@@ -43,7 +43,7 @@ class TestUtils(unittest.TestCase):
 
     def test_is_text_bytes_accepts_utf8_and_latin1(self) -> None:
         """Non-ASCII text encodings should not be mistaken for binary."""
-        self.assertTrue(is_text_bytes("# Café — résumé ✓\n".encode("utf-8")))
+        self.assertTrue(is_text_bytes("# Café, résumé, naïve ✓\n".encode()))
         self.assertTrue(is_text_bytes(b"\xef\xbb\xbfkey = 1\n"))
         self.assertTrue(is_text_bytes("naïve = 1\n".encode("latin-1")))
 
