@@ -1,176 +1,284 @@
 # Secret Sentinel
 
-Local secret scanner for Git repositories. It uses regex and entropy detection and has no runtime dependencies. Python 3.10+.
+A local secret scanner for Git repositories. It finds hardcoded credentials
+in files, staged changes, and commit history before they reach a remote.
+
+- Runs offline with no runtime dependencies
+- Works as a pre-commit hook, a pre-push hook, or a GitHub Action
+- Never prints detected values; reports are always redacted
+- Requires Python 3.10 or later
+
+## Contents
+
+- [Install](#install)
+- [Quick start](#quick-start)
+- [Scan modes](#scan-modes)
+- [Git hooks](#git-hooks)
+- [CI](#ci)
+- [Configuration](#configuration)
+- [Suppressing findings](#suppressing-findings)
+- [Baseline](#baseline)
+- [Detection](#detection)
+- [AI validation](#ai-validation)
+- [Development](#development)
+
+## Install
 
 ```bash
-pipx install secret-sentinel               # or: python -m pip install secret-sentinel
-python -m pip install -e ".[dev]"          # from a checkout, with dev tooling
+pipx install secret-sentinel
 ```
 
-## Usage
+Or with pip:
 
 ```bash
-secret-sentinel .                          # scan working tree (or any files/dirs)
-secret-sentinel --staged                   # scan the Git index (default when no paths given)
-secret-sentinel --diff origin/main         # added lines in working tree vs a base ref
-secret-sentinel --commit-range BASE HEAD   # every commit in BASE..HEAD, incl. secrets later removed
-secret-sentinel --git-history [--all-refs] # all commits reachable from HEAD (or all refs)
+python -m pip install secret-sentinel
 ```
 
-Output: `--format text|json|sarif`, `--output FILE`. Use `--coverage` (path scans only) to report scanned and skipped file counts.
+## Quick start
 
-Exit codes: `0` clean, `1` findings at or above the threshold (or a runtime error), `2` invalid usage or config.
-
-Findings are always redacted in output, history and baselines.
-
-## Hooks
+Run these from the root of your repository.
 
 ```bash
-secret-sentinel --install-hook             # pre-commit: scans the index
-secret-sentinel --install-pre-push-hook    # pre-push: scans commits not yet on the remote ref
-secret-sentinel --uninstall-hook | --uninstall-pre-push-hook
-secret-sentinel --init [--yes]             # pre-commit install with confirmation
-secret-sentinel --setup                    # interactive setup
-secret-sentinel --doctor                   # check repo, config, hooks, baseline
+secret-sentinel --setup
+secret-sentinel .
+secret-sentinel --doctor
 ```
 
-The installers never overwrite a hook that Secret Sentinel did not create.
+| Command | What it does |
+|---|---|
+| `--setup` | Guided setup for hooks, baseline, and CI |
+| `.` | Scans the working tree |
+| `--doctor` | Checks the repository, config, and hooks |
 
-pre-commit framework:
+## Scan modes
+
+```bash
+secret-sentinel .
+secret-sentinel src/ config.yaml
+secret-sentinel --staged
+secret-sentinel --diff origin/main
+secret-sentinel --commit-range origin/main HEAD
+secret-sentinel --git-history
+```
+
+| Mode | Scans |
+|---|---|
+| paths | Files and folders on disk |
+| `--staged` | The Git index (default when no paths are given) |
+| `--diff BASE` | Lines added since `BASE` |
+| `--commit-range BASE HEAD` | Every commit in the range, including secrets added and later removed |
+| `--git-history` | All commits reachable from `HEAD` (add `--all-refs` for all branches) |
+
+### Output
+
+```bash
+secret-sentinel . --format json
+secret-sentinel . --format sarif --output results.sarif
+secret-sentinel . --coverage
+```
+
+- `--format` accepts `text` (default), `json`, or `sarif`.
+- `--coverage` lists scanned and skipped file counts for path scans.
+
+### Exit codes
+
+| Code | Meaning |
+|---|---|
+| `0` | No findings at or above the threshold |
+| `1` | Findings at or above the threshold, or a scan error |
+| `2` | Invalid arguments or configuration |
+
+## Git hooks
+
+```bash
+secret-sentinel --install-hook
+secret-sentinel --install-pre-push-hook
+```
+
+- The pre-commit hook scans staged changes.
+- The pre-push hook scans commits that are not yet on the remote.
+- Remove them with `--uninstall-hook` and `--uninstall-pre-push-hook`.
+- Existing hooks that Secret Sentinel did not create are never replaced.
+
+### pre-commit framework
 
 ```yaml
 repos:
   - repo: https://github.com/tajamul-wani/secret-sentinel
     rev: v0.2.0
     hooks:
-      - id: secret-sentinel   # runs: --staged --no-ai
+      - id: secret-sentinel
 ```
-
-## Configuration
-
-`.secret-sentinel.ini` at the repo root:
-
-```ini
-[secret-sentinel]
-fail_on = HIGH                  # LOW | MEDIUM | HIGH | CRITICAL (default LOW); CLI: --fail-on
-ignore_paths = tests/fixtures/creds.json, docs/*.md
-ai_enabled = false
-ai_cloud_enabled = false
-
-[custom_rules]
-Internal API Token = CRITICAL | \bcorp_[A-Za-z0-9]{32}\b
-```
-
-- **Ignoring paths.** `.secretignore` takes one glob per line, and `#` starts a comment. Globs are matched with `fnmatch` against repo-relative paths, so `*` also matches `/`. Default ignores cover `.git`, `__pycache__`, `node_modules` and `venv`/`.venv` at any depth, root-level `env/` and `.env/` directories, and minified bundles and source maps (`*.min.js`, `*.min.css`, `*.map`). Lockfiles are still scanned, because registry URLs in them can carry tokens.
-- **Custom rules.** Each rule is `NAME = SEVERITY | REGEX`, and the reported value is the full match. An invalid severity, an invalid regex, a pattern that matches an empty string, or a name that clashes with a built-in rule exits with code `2`.
-
-### Inline suppression
-
-```python
-key = "..."  # secret-sentinel: ignore reason: test fixture expires: 2026-12-31
-# secret-sentinel: disable-next-line reason: rotated
-key = "..."
-```
-
-`#`, `//` and `/* */` comments all work. A suppression whose expiry date has passed, or whose date is invalid, stops suppressing. Run `--audit-suppressions` to list suppressions that are missing a reason, expired or unused.
-
-### Baseline
-
-```bash
-export SECRET_SENTINEL_BASELINE_KEY=$(python -c "import secrets; print(secrets.token_hex(32))")
-secret-sentinel --update-baseline .        # record current findings
-secret-sentinel --baseline .               # report only new findings
-```
-
-`.secret-sentinel/baseline.json` stores HMAC-SHA-256 fingerprints of `(path, rule, value)`, never the values themselves. Every machine and CI job needs the same key (at least 32 bytes), so keep it in a CI secret and never commit it. Renaming a file changes its fingerprints, so its findings show up as new. `--update-baseline` replaces the file rather than merging into it.
-
-## Detection
-
-Rule pack `3`. Every rule is matched one line at a time, except private keys, which are matched as whole blocks.
-
-| Severity | Rules |
-|---|---|
-| CRITICAL | AWS secret key, Google API key, Google OAuth client secret, Stripe, GitHub (`ghp_ gho_ ghu_ ghs_ ghr_ github_pat_`), GitLab (`glpat- gldt- glptt- glrt-`), Slack token, Twilio, SendGrid, Azure Storage account key, Shopify, DigitalOcean, Databricks, OpenAI, Anthropic, Hugging Face, PyPI, npm, private keys, DB connection URIs with passwords, `.netrc`, `.pgpass`, Docker registry auth |
-| HIGH | JWT, Slack webhook URL, Telegram bot token, Mailchimp, generic `key/token/secret/password = value` (16+ chars), password assignment (8+ chars, at least 2 character classes, quoted or `KEY=value` dotenv style) |
-| MEDIUM | AWS access key ID, high-entropy quoted values (Shannon entropy ≥ 4.6, 24+ chars) |
-
-- **Encoded secrets.** Base64 values found in secret-like fields are decoded and checked against the provider rules.
-- **Placeholders.** Values like `${VAR}`, `{{x}}`, `<x>`, `your_key_here`, `change-me` and `xxx` are not reported.
-- **What gets scanned.** A file counts as binary, and is skipped, if it contains a NUL byte or more than 5% control bytes. UTF-8 and Latin-1 text files are scanned.
-- **Size limit.** Files over 5 MB are skipped in every scan mode and logged by path. In `--coverage` output they're counted as `oversized`, and they mark the scan incomplete.
-
-## AI validation (optional, off by default)
-
-This step can drop generic, password and entropy findings that a model judges to be false positives. Provider-specific matches are never sent to the model, and the scanned code can't talk it into dropping them.
-
-- **Local.** Set `ai_enabled = true` to use the Ollama CLI. Env vars: `OLLAMA_MODEL` (default `llama3.2`), `OLLAMA_BIN`, `OLLAMA_TIMEOUT` (default 30s).
-- **Cloud.** Set `ai_cloud_enabled = true` as well, plus `GEMINI_API_KEY`. Optional env vars: `GEMINI_MODEL` (default `gemini-2.5-flash`) and `GEMINI_API_URL`. Gemini is only tried when Ollama gives no answer.
-- **Data sent.** Context is redacted before it leaves the process: three lines around each finding, with known patterns and the detected value removed.
-- **Decision rule.** A finding is dropped only when the response is exactly `FALSE_POSITIVE`. Errors, timeouts and any other response keep it.
-- Pass `--no-ai` to skip validation for a single run.
-
-## History
-
-```bash
-secret-sentinel --history [--history-limit N] | --stats | --clear-history
-```
-
-Scan results are stored locally in `.secret-sentinel/scan_history.jsonl`: counts and severities only, no values.
 
 ## CI
 
-Use the GitHub Action:
+Add the GitHub Action to a workflow:
 
 ```yaml
 on:
   push:
   pull_request:
+
 permissions:
   contents: read
+
 jobs:
   secrets:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
       - uses: tajamul-wani/secret-sentinel@v0.2.0
-        with:
-          fail-on: HIGH          # optional, default LOW
-          # sarif: "true"        # send results to code scanning; needs security-events: write
 ```
+
+Optional inputs:
+
+| Input | Default | Description |
+|---|---|---|
+| `fail-on` | `LOW` | Minimum severity that fails the job |
+| `sarif` | `false` | Send results to code scanning (needs `security-events: write`) |
 
 What the action scans:
 
 | Event | Scan |
 |---|---|
-| Pull request | `--commit-range origin/<base> HEAD`, so a secret added and later removed is still caught |
-| Push | the pushed commits (`before..HEAD`) |
-| New branch, force push, other events | the working tree |
+| Pull request | All commits between the base branch and `HEAD` |
+| Push | The pushed commits |
+| New branch or force push | The working tree |
 
-The action fetches full history itself, so a shallow checkout works. It also installs Python 3.12 with `actions/setup-python`, which affects later steps in the same job. It never uses a baseline key.
+Notes:
 
-For extra protection, make the scan a required status check in branch protection. Local hooks can be skipped with `--no-verify`; CI can't.
+- Shallow checkouts are handled automatically.
+- The action installs Python 3.12, which later steps in the job will use.
+- Make the scan a required status check. Local hooks can be skipped with
+  `--no-verify`; CI cannot.
+- The baseline key is only passed to trusted pushes on `main`;
+  pull-request scans run without it.
 
-This repo's own workflow is [.github/workflows/python-app.yml](.github/workflows/python-app.yml). It runs the tests on Python 3.10–3.12, runs the action against the repo itself, scans pushes with `--baseline` and uploads SARIF. The baseline key is only passed to trusted pushes on `main`; pull-request scans run without it.
+## Configuration
+
+Create `.secret-sentinel.ini` in the repository root:
+
+```ini
+[secret-sentinel]
+fail_on = HIGH
+ignore_paths = tests/fixtures/*, docs/*.md
+
+[custom_rules]
+Internal Token = CRITICAL | \bcorp_[A-Za-z0-9]{32}\b
+```
+
+| Setting | Description |
+|---|---|
+| `fail_on` | `LOW`, `MEDIUM`, `HIGH`, or `CRITICAL`. Default `LOW`. Override with `--fail-on`. |
+| `ignore_paths` | Comma-separated globs, relative to the repository root |
+| `custom_rules` | One rule per line: `NAME = SEVERITY \| REGEX` |
+
+You can also list ignore globs in `.secretignore`, one per line.
+
+Ignored by default:
+
+- `.git`, `node_modules`, `venv`, `.venv`, and `__pycache__` at any depth
+- `env/` and `.env/` at the repository root
+- Minified bundles and source maps: `*.min.js`, `*.min.css`, `*.map`
+
+Lockfiles are still scanned because registry URLs can contain tokens.
+
+## Suppressing findings
+
+Add a comment on the same line:
+
+```python
+key = "..."  # secret-sentinel: ignore reason: fixture
+```
+
+Or on the line before:
+
+```python
+# secret-sentinel: disable-next-line reason: fixture
+key = "..."
+```
+
+- Add `expires: YYYY-MM-DD` to make a suppression temporary.
+- `#`, `//`, and `/* */` comments are supported.
+- Run `secret-sentinel --audit-suppressions` to find suppressions that are
+  missing a reason, expired, or no longer needed.
+
+## Baseline
+
+Use a baseline to accept existing findings and fail only on new ones.
+
+```bash
+secret-sentinel --update-baseline .
+secret-sentinel --baseline .
+```
+
+- Fingerprints are stored in `.secret-sentinel/baseline.json`. Secret
+  values are never stored.
+- Baseline commands need a shared key of at least 32 bytes in
+  `SECRET_SENTINEL_BASELINE_KEY`. Store it as a CI secret and never
+  commit it.
+- Renaming a file makes its findings appear as new.
+
+Generate a key:
+
+```bash
+python -c "import secrets; print(secrets.token_hex(32))"
+```
+
+## Detection
+
+| Severity | Detects |
+|---|---|
+| Critical | Cloud and SaaS keys: AWS, Google, Azure Storage, Stripe, GitHub, GitLab, Slack, Twilio, SendGrid, Shopify, DigitalOcean, Databricks, OpenAI, Anthropic, Hugging Face, PyPI, npm |
+| Critical | Private keys, database URLs with passwords, `.netrc`, `.pgpass`, Docker registry auth |
+| High | JWTs, Slack webhooks, Telegram bot tokens, Mailchimp keys |
+| High | Generic `key`, `token`, `secret`, and `password` assignments |
+| Medium | AWS access key IDs and high-entropy values in secret fields |
+
+How scanning works:
+
+- Base64 values in secret fields are decoded and checked again.
+- Placeholders such as `${VAR}`, `<value>`, and `your_key_here` are skipped.
+- Binary files are skipped. UTF-8 and Latin-1 text files are scanned.
+- Files larger than 5 MB are skipped and counted in `--coverage`.
+
+## AI validation
+
+AI validation is optional and disabled by default. When enabled, a model can
+discard generic findings that look like test data. Provider-specific matches,
+such as a GitHub token, are always kept.
+
+```ini
+[secret-sentinel]
+ai_enabled = true
+```
+
+| Backend | Setup |
+|---|---|
+| Ollama (local) | Install Ollama. Optional: `OLLAMA_MODEL`, `OLLAMA_TIMEOUT` |
+| Gemini (cloud) | Also set `ai_cloud_enabled = true` and `GEMINI_API_KEY` |
+
+- Detected values are redacted before any context is sent.
+- If the model is unavailable or unclear, the finding is kept.
+- Use `--no-ai` to skip validation for a single run.
 
 ## Development
 
 ```bash
-python -m unittest discover -s tests       # or: pytest
-python tests/run_coverage.py               # stdlib coverage, fails under 80%
-python -m scripts.benchmark_leaky_repo /path/to/leaky-repo --revision <sha>
+python -m pip install -e ".[dev]"
+python -m unittest discover -s tests
+python tests/run_coverage.py
 ```
 
-To release, bump `__version__` in `secret_sentinel/__init__.py`, which is the only place the version is defined. Then push a matching `vX.Y.Z` tag. [release.yml](.github/workflows/release.yml) checks that the tag matches the version, runs the tests, builds the package, publishes it to PyPI through trusted publishing (the `pypi` environment) and creates the GitHub release. Workflow actions are pinned by commit SHA.
+The coverage check fails below 80%.
 
-The detection quality tests (`tests/test_detection_quality.py`) run against a synthetic corpus and report precision and recall per rule. Because that corpus is maintained alongside the rules, use the Leaky Repo benchmark to see how detection holds up on outside data.
+To release a new version:
 
-Layout:
+1. Update `__version__` in `secret_sentinel/__init__.py`.
+2. Push a tag that matches it, for example `v0.2.0`.
 
-- `scanner.py`: rules and scan modes
-- `cli.py`: entry point and hooks
-- `formatters.py`: text, JSON and SARIF output
-- `config.py`: config loading
-- `baseline.py`, `history.py`, `remediation.py`, `risk_scoring.py`, `ai_validator.py`
+The release workflow tests, builds, and publishes to PyPI, then creates a
+GitHub release.
 
 ## License
 
