@@ -9,7 +9,7 @@ inputs:
     description: Minimum severity that fails the step (LOW, MEDIUM, HIGH, CRITICAL).
     default: LOW
   sarif:
-    description: Upload results to code scanning instead of printing them. Needs `security-events: write`.
+    description: "Upload results to code scanning instead of printing them. Needs security-events: write permission."
     default: "false"
 
 runs:
