@@ -36,6 +36,10 @@ DEFAULT_IGNORE = [
     "*/node_modules/*",
     "*/.venv/*",
     "*/venv/*",
+    # Minified bundles and source maps are build output of scanned sources.
+    "*.min.js",
+    "*.min.css",
+    "*.map",
 ]
 
 

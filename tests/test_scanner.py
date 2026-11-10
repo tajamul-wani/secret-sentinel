@@ -1012,6 +1012,7 @@ class TestScanner(unittest.TestCase):
                 "binary_files": 1,
                 "unreadable_paths": 0,
                 "missing_paths": 1,
+                "oversized_files": 0,
             },
         )
 
@@ -1186,6 +1187,23 @@ class TestRulePackThree(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertTrue(_is_ignored(path, DEFAULT_IGNORE, "/r"))
         self.assertFalse(_is_ignored("/r/src/env/settings.py", DEFAULT_IGNORE, "/r"))
+        for path in ("/r/dist/app.min.js", "/r/dist/app.min.css", "/r/dist/app.js.map"):
+            with self.subTest(path=path):
+                self.assertTrue(_is_ignored(path, DEFAULT_IGNORE, "/r"))
+
+    def test_skips_and_reports_oversized_files(self) -> None:
+        """Files over the size limit should be skipped and counted."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "big.txt")
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write(f'token = "ghp_{self.BODY}"\n')
+            coverage = ScanCoverage()
+            with patch("secret_sentinel.scanner.MAX_FILE_BYTES", 10):
+                with self.assertLogs("secret_sentinel", level="WARNING"):
+                    issues = scan_paths([tmpdir], repo_root=tmpdir, coverage=coverage)
+        self.assertEqual(issues, [])
+        self.assertEqual(coverage.oversized_files, 1)
+        self.assertEqual(coverage.scanned_files, 0)
 
 
 if __name__ == "__main__":

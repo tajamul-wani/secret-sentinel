@@ -94,6 +94,7 @@ def format_text(
         incomplete = coverage is not None and (
             coverage.get("unreadable_paths", 0) > 0
             or coverage.get("missing_paths", 0) > 0
+            or coverage.get("oversized_files", 0) > 0
         )
         message = (
             "Scan incomplete. No potential secrets were found in readable files."
@@ -174,6 +175,7 @@ def format_text(
     elif coverage is None or not (
         coverage.get("unreadable_paths", 0)
         or coverage.get("missing_paths", 0)
+        or coverage.get("oversized_files", 0)
     ):
         lines.append(
             f"Scan passed with warnings: detected issues are below failure threshold ({threshold.name})."
@@ -181,6 +183,7 @@ def format_text(
     if coverage is not None and (
         coverage.get("unreadable_paths", 0)
         or coverage.get("missing_paths", 0)
+        or coverage.get("oversized_files", 0)
     ):
         lines.append("Scan incomplete: some requested paths could not be checked.")
     if coverage is not None:
@@ -196,7 +199,8 @@ def _format_coverage(coverage: Dict[str, int]) -> str:
         f"{coverage.get('ignored_paths', 0)} ignored, "
         f"{coverage.get('binary_files', 0)} binary, "
         f"{coverage.get('unreadable_paths', 0)} unreadable, "
-        f"{coverage.get('missing_paths', 0)} missing."
+        f"{coverage.get('missing_paths', 0)} missing, "
+        f"{coverage.get('oversized_files', 0)} oversized."
     )
 
 
@@ -221,6 +225,7 @@ def format_json(
     incomplete = coverage is not None and (
         coverage.get("unreadable_paths", 0)
         or coverage.get("missing_paths", 0)
+        or coverage.get("oversized_files", 0)
     )
     if incomplete:
         status = "incomplete"

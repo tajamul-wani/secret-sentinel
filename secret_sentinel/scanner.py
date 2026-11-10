@@ -2,6 +2,7 @@
 
 import base64
 import fnmatch
+import logging
 import os
 import re
 import subprocess
@@ -15,6 +16,10 @@ from .utils import is_text_bytes, sanitize_snippet, shannon_entropy
 from .risk_scoring import get_risk_score
 
 RULE_PACK_VERSION = "3"
+# Larger files are skipped and reported so a hook cannot stall on build output.
+MAX_FILE_BYTES = 5 * 1024 * 1024
+
+logger = logging.getLogger("secret_sentinel")
 
 SECRET_PATTERNS = {
     "AWS Access Key ID": re.compile(
@@ -123,6 +128,7 @@ class ScanCoverage:
     binary_files: int = 0
     unreadable_paths: int = 0
     missing_paths: int = 0
+    oversized_files: int = 0
 
     def as_dict(self) -> Dict[str, int]:
         """Return coverage counts in a serialization-friendly form."""
@@ -132,7 +138,18 @@ class ScanCoverage:
             "binary_files": self.binary_files,
             "unreadable_paths": self.unreadable_paths,
             "missing_paths": self.missing_paths,
+            "oversized_files": self.oversized_files,
         }
+
+
+def _is_oversized(size: int, source: str) -> bool:
+    """Return whether content exceeds the scan size limit, logging the skip."""
+    if size <= MAX_FILE_BYTES:
+        return False
+    logger.warning(
+        "Skipped %s: larger than %d MB.", _normalize_path(source), MAX_FILE_BYTES // (1024 * 1024)
+    )
+    return True
 
 
 def _run_git_command(args: List[str], cwd: Optional[str] = None, text: bool = True) -> subprocess.CompletedProcess:
@@ -744,7 +761,7 @@ def scan_staged_files(
         if _is_ignored(absolute_path, active_ignores, effective_repo_root):
             continue
         content = get_staged_content(path, effective_repo_root)
-        if content is None:
+        if content is None or _is_oversized(len(content), path):
             continue
         safe_path = _sanitize_source_path(path, effective_repo_root)
         issues.extend(scan_text(content, safe_path, custom_rules=custom_rules))
@@ -1031,9 +1048,9 @@ def _scan_git_tree_paths(
 
     issues: List[Dict[str, Any]] = []
     for (absolute_path, _oid), data in zip(blobs, _read_git_blobs(repo_root, blobs)):
-        if not is_text_bytes(data):
-            continue
         source = _sanitize_source_path(absolute_path, repo_root)
+        if _is_oversized(len(data), source) or not is_text_bytes(data):
+            continue
         content = data.decode("utf-8", errors="replace")
         issues.extend(scan_text(content, source, custom_rules=custom_rules))
     return issues
@@ -1107,6 +1124,8 @@ def scan_git_diff(
             continue
 
         try:
+            if _is_oversized(os.path.getsize(absolute_path), path):
+                continue
             with open(absolute_path, "rb") as handle:
                 data = handle.read()
         except OSError:
@@ -1217,6 +1236,10 @@ def scan_paths(
                             coverage.ignored_paths += 1
                         continue
                     try:
+                        if _is_oversized(os.path.getsize(full_path), full_path):
+                            if coverage is not None:
+                                coverage.oversized_files += 1
+                            continue
                         with open(full_path, "rb") as handle:
                             data = handle.read()
                     except OSError:
@@ -1242,6 +1265,10 @@ def scan_paths(
                 coverage.ignored_paths += 1
             continue
         try:
+            if _is_oversized(os.path.getsize(path), path):
+                if coverage is not None:
+                    coverage.oversized_files += 1
+                continue
             with open(path, "rb") as handle:
                 data = handle.read()
         except OSError:
