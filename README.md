@@ -108,7 +108,7 @@ secret-sentinel --install-pre-push-hook
 ```yaml
 repos:
   - repo: https://github.com/tajamul-wani/secret-sentinel
-    rev: v0.2.0
+    rev: v0.2.1
     hooks:
       - id: secret-sentinel
 ```
@@ -130,7 +130,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - uses: tajamul-wani/secret-sentinel@v0.2.0
+      - uses: tajamul-wani/secret-sentinel@v0.2.1
 ```
 
 Optional inputs:

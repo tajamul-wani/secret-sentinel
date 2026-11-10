@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from secret_sentinel.scanner import RULE_PACK_VERSION, scan_text
 
-CORPUS_VERSION = 4
+CORPUS_VERSION = 5
 
 
 @dataclass(frozen=True)
@@ -356,6 +356,49 @@ def build_cases() -> list[DetectionCase]:
             "High entropy string",
         ),
         DetectionCase("JWT", f'jwt = "{jwt}"', True, "JWT"),
+        DetectionCase(
+            "Password keyword argument",
+            "        password=password,",
+            False,
+            source="client.py",
+        ),
+        DetectionCase(
+            "Password attribute keyword argument",
+            "        key_password=self.key_password,",
+            False,
+            source="connection.py",
+        ),
+        DetectionCase(
+            "Password from function call",
+            "url, netloc, url_user_password = split_auth_netloc_from_url(",
+            False,
+            source="auth.py",
+        ),
+        DetectionCase(
+            "Password unpacked from variable",
+            "username, password = index_url_user_password",
+            False,
+            source="auth.py",
+        ),
+        DetectionCase(
+            "Generic key from function call",
+            "api_key = load_api_key_from_environment()",
+            False,
+            source="settings.py",
+        ),
+        DetectionCase(
+            "Unquoted password in source code",
+            "PASSWORD=Summer2024!",
+            False,
+            source="settings.py",
+        ),
+        DetectionCase(
+            "Unquoted password in shell config",
+            "export DB_PASSWORD=Summer2024!",
+            True,
+            "Password Assignment",
+            "deploy.sh",
+        ),
         DetectionCase(
             "Unrelated entropy beside secret terminology",
             f'print("secret rotation complete", "{unrelated_entropy}")',

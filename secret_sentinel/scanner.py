@@ -15,7 +15,7 @@ from .config import DEFAULT_IGNORE, CustomRule
 from .risk_scoring import get_risk_score
 from .utils import is_text_bytes, sanitize_snippet, shannon_entropy
 
-RULE_PACK_VERSION = "3"
+RULE_PACK_VERSION = "4"
 # Larger files are skipped and reported so a hook cannot stall on build output.
 MAX_FILE_BYTES = 5 * 1024 * 1024
 
@@ -106,6 +106,9 @@ QUOTED_PASSWORD_PATTERN = re.compile(
     r"""(?i)(?<![A-Za-z0-9])[A-Za-z0-9_-]*?(?:password|passwd|secret)(?![A-Za-z0-9])"""
     r"""["']?\s*[:=]\s*(?P<quote>["'])(?P<value>[^\s"']{8,})(?P=quote)"""
 )
+# Letters only: variable names rarely contain the digit runs that tokens do.
+SNAKE_CASE_NAME_PATTERN = re.compile(r"[a-z]+(?:_[a-z]+)+")
+CONFIG_FILE_SUFFIXES = (".env", ".sh", ".bash", ".zsh", ".ini", ".cfg", ".conf", ".properties")
 ENV_PASSWORD_PATTERN = re.compile(
     r"""(?i)^\s*(?:export\s+)?[A-Za-z0-9_]*(?:password|passwd|secret)="""
     r"""(?P<quote>["']?)(?P<value>[^\s"']{8,})(?P=quote)(?:\s+#.*)?\s*$"""
@@ -397,6 +400,8 @@ def _scan_line(
                 "Generic Secret Assignment",
             } and PLACEHOLDER_VALUE_PATTERN.fullmatch(value):
                 continue
+            if name == "Generic Secret Assignment" and _is_code_reference(line, match):
+                continue
             severity = get_risk_score(name)
             issues.append(
                 {
@@ -462,7 +467,12 @@ def _scan_line(
                     "severity": severity.name,
                 }
             )
-    for pattern in (QUOTED_PASSWORD_PATTERN, ENV_PASSWORD_PATTERN):
+    password_patterns = [QUOTED_PASSWORD_PATTERN]
+    # Unquoted KEY=value is a config assignment only in config-style files; in
+    # source code the same shape is a keyword argument such as password=password.
+    if _is_config_file(source):
+        password_patterns.append(ENV_PASSWORD_PATTERN)
+    for pattern in password_patterns:
         for match in pattern.finditer(line):
             value = match.group("value")
             if not _looks_like_password(value) or any(
@@ -474,6 +484,20 @@ def _scan_line(
             finding["confidence"] = "medium"
             issues.append(finding)
     return issues
+
+
+def _is_code_reference(line: str, match: re.Match[str]) -> bool:
+    """Return whether a generic match is a function call or unquoted variable name."""
+    if line[match.end(1):match.end(1) + 1] == "(":
+        return True
+    quoted = match.start(1) > 0 and line[match.start(1) - 1] in "\"'"
+    return not quoted and bool(SNAKE_CASE_NAME_PATTERN.fullmatch(match.group(1)))
+
+
+def _is_config_file(source: str) -> bool:
+    """Return whether a path is a dotenv, shell, or INI-style config file."""
+    name = Path(source).name.lower()
+    return name.startswith(".env") or name.endswith(CONFIG_FILE_SUFFIXES)
 
 
 def _looks_like_password(value: str) -> bool:
