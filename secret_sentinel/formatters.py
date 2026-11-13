@@ -278,6 +278,7 @@ def format_json(
         report["scan_complete"] = not (
             coverage.get("unreadable_paths", 0)
             or coverage.get("missing_paths", 0)
+            or coverage.get("oversized_files", 0)
         )
     return json.dumps(report, indent=2)
 
@@ -385,6 +386,7 @@ def format_sarif(
         run_properties["scanComplete"] = not (
             coverage.get("unreadable_paths", 0)
             or coverage.get("missing_paths", 0)
+            or coverage.get("oversized_files", 0)
         )
     sarif_log["runs"][0]["properties"] = run_properties
     return json.dumps(sarif_log, indent=2)

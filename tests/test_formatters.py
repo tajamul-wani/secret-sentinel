@@ -162,6 +162,7 @@ class TestFormatters(unittest.TestCase):
             "binary_files": 1,
             "unreadable_paths": 0,
             "missing_paths": 0,
+            "oversized_files": 0,
         }
 
         data = json.loads(format_json([], coverage=coverage))
@@ -197,6 +198,26 @@ class TestFormatters(unittest.TestCase):
         self.assertIn("Scan incomplete", text_with_findings)
         self.assertNotIn("Scan passed with warnings", text_with_findings)
         self.assertEqual(json_with_findings["status"], "incomplete")
+
+    def test_formatters_mark_oversized_scans_incomplete(self) -> None:
+        """Reports mark scans incomplete when files exceed the scan size limit."""
+        coverage = {
+            "scanned_files": 0,
+            "ignored_paths": 0,
+            "binary_files": 0,
+            "unreadable_paths": 0,
+            "missing_paths": 0,
+            "oversized_files": 1,
+        }
+
+        text = format_text([], coverage=coverage)
+        json_report = json.loads(format_json([], coverage=coverage))
+        sarif_report = json.loads(format_sarif([], coverage=coverage))
+
+        self.assertIn("Scan incomplete", text)
+        self.assertEqual(json_report["status"], "incomplete")
+        self.assertFalse(json_report["scan_complete"])
+        self.assertFalse(sarif_report["runs"][0]["properties"]["scanComplete"])
 
     def test_format_json_sanitizes_unknown_detection_reason(self) -> None:
         """Unknown reason metadata should not leak into JSON reports."""

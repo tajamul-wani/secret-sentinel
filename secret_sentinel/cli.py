@@ -132,6 +132,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Report scanned and skipped paths for an explicit on-disk path scan.",
     )
     parser.add_argument(
+        "--strict-coverage",
+        action="store_true",
+        help=(
+            "Fail an explicit on-disk path scan if any requested paths are "
+            "missing, unreadable, or oversized."
+        ),
+    )
+    parser.add_argument(
         "--install-hook",
         action="store_true",
         help="Install secret-sentinel as a Git pre-commit hook in the current repository.",
@@ -847,7 +855,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.yes and not args.init:
         logger.error("--yes can only be used with --init.")
         return 2
-    if args.coverage and (
+    if (args.coverage or args.strict_coverage) and (
         not args.paths
         or args.staged
         or args.git_history
@@ -1227,8 +1235,11 @@ def main(argv: list[str] | None = None) -> int:
             return 1
 
     scan_incomplete = bool(coverage.unreadable_paths or coverage.missing_paths)
+    strict_coverage_failure = args.strict_coverage and bool(
+        scan_incomplete or coverage.oversized_files
+    )
     if args.update_baseline:
-        if scan_incomplete:
+        if scan_incomplete or strict_coverage_failure:
             logger.error(
                 "Baseline not updated; the scan did not check every requested path."
             )
@@ -1277,7 +1288,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     status = (
         "incomplete"
-        if scan_incomplete
+        if scan_incomplete or strict_coverage_failure
         else "blocked" if should_block else "completed"
     )
     history_manager.record_scan(issues, scan_type=scan_type, status=status)
@@ -1289,7 +1300,7 @@ def main(argv: list[str] | None = None) -> int:
             baseline_suppressed=baseline_suppressed,
             coverage=(
                 coverage.as_dict()
-                if args.coverage or scan_incomplete
+                if args.coverage or args.strict_coverage or scan_incomplete
                 else None
             ),
         )
@@ -1300,7 +1311,7 @@ def main(argv: list[str] | None = None) -> int:
             baseline_suppressed=baseline_suppressed,
             coverage=(
                 coverage.as_dict()
-                if args.coverage or scan_incomplete
+                if args.coverage or args.strict_coverage or scan_incomplete
                 else None
             ),
         )
@@ -1311,7 +1322,7 @@ def main(argv: list[str] | None = None) -> int:
             baseline_suppressed=baseline_suppressed,
             coverage=(
                 coverage.as_dict()
-                if args.coverage or scan_incomplete
+                if args.coverage or args.strict_coverage or scan_incomplete
                 else None
             ),
         )
@@ -1326,7 +1337,7 @@ def main(argv: list[str] | None = None) -> int:
     else:
         print(output_str)
 
-    return 1 if should_block or scan_incomplete else 0
+    return 1 if should_block or scan_incomplete or strict_coverage_failure else 0
 
 
 if __name__ == "__main__":

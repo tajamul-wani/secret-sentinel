@@ -26,6 +26,7 @@ from secret_sentinel.cli import (
     scan_paths as cli_scan_paths,
 )
 from secret_sentinel.history import ScanHistory
+from secret_sentinel.scanner import ScanCoverage
 
 DUMMY_AWS = "AKIA" + "1234567890ABCDEF"
 
@@ -60,6 +61,10 @@ class TestCLI(unittest.TestCase):
     def test_parse_args_for_coverage(self) -> None:
         """Parse the optional explicit-path coverage report switch."""
         self.assertTrue(parse_args([".", "--coverage"]).coverage)
+
+    def test_parse_args_for_strict_coverage(self) -> None:
+        """Parse the explicit-path strict coverage switch."""
+        self.assertTrue(parse_args([".", "--strict-coverage"]).strict_coverage)
 
     def test_parse_args_for_staged_scan(self) -> None:
         """Test parsing --staged and --no-ai."""
@@ -1344,6 +1349,7 @@ class TestCLI(unittest.TestCase):
         """Coverage mode rejects implicit staged scans."""
         with patch("secret_sentinel.cli.get_git_root", return_value=None):
             self.assertEqual(main(["--coverage"]), 2)
+            self.assertEqual(main(["--strict-coverage"]), 2)
 
     def test_main_reports_explicit_disk_scan_coverage(self) -> None:
         """Coverage counts flow from disk scanning into machine-readable output."""
@@ -1365,6 +1371,26 @@ class TestCLI(unittest.TestCase):
         report = json.loads(output.getvalue())
         self.assertEqual(result, 0)
         self.assertEqual(report["coverage"]["scanned_files"], 1)
+        self.assertEqual(report["coverage"]["binary_files"], 1)
+
+    def test_main_strict_coverage_allows_binary_files(self) -> None:
+        """Intentional binary skips do not fail strict coverage."""
+        with tempfile.TemporaryDirectory() as repo_root:
+            with open(os.path.join(repo_root, "binary.bin"), "wb") as handle:
+                handle.write(b"\x00binary")
+
+            output = StringIO()
+            with (
+                redirect_stdout(output),
+                patch("secret_sentinel.cli.get_git_root", return_value=repo_root),
+            ):
+                result = main(
+                    [repo_root, "--strict-coverage", "--no-ai", "--format", "json"]
+                )
+
+        report = json.loads(output.getvalue())
+        self.assertEqual(result, 0)
+        self.assertTrue(report["scan_complete"])
         self.assertEqual(report["coverage"]["binary_files"], 1)
 
     def test_main_fails_incomplete_disk_scan_and_reports_coverage(self) -> None:
@@ -1401,6 +1427,29 @@ class TestCLI(unittest.TestCase):
         self.assertEqual(result, 1)
         self.assertFalse(report["scan_complete"])
         self.assertEqual(report["coverage"]["missing_paths"], 1)
+
+    def test_main_strict_coverage_fails_on_oversized_files(self) -> None:
+        """Strict coverage fails when requested files cannot be scanned by size."""
+        with tempfile.TemporaryDirectory() as repo_root:
+            output = StringIO()
+            coverage = ScanCoverage(oversized_files=1)
+            with (
+                patch("secret_sentinel.cli.get_git_root", return_value=repo_root),
+                patch("secret_sentinel.cli.ScanCoverage", return_value=coverage),
+                patch("secret_sentinel.cli.scan_paths", return_value=[]),
+                redirect_stdout(output),
+            ):
+                result = main(
+                    [repo_root, "--strict-coverage", "--no-ai", "--format", "json"]
+                )
+
+            history_status = ScanHistory(repo_root).get_history()[0]["status"]
+
+        report = json.loads(output.getvalue())
+        self.assertEqual(result, 1)
+        self.assertFalse(report["scan_complete"])
+        self.assertEqual(report["coverage"]["oversized_files"], 1)
+        self.assertEqual(history_status, "incomplete")
 
     def test_main_reports_staged_scan_failures_without_details(self) -> None:
         """Git index read failures return a visible nonzero scan result."""

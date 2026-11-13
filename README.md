@@ -78,10 +78,14 @@ secret-sentinel --git-history
 secret-sentinel . --format json
 secret-sentinel . --format sarif --output results.sarif
 secret-sentinel . --coverage
+secret-sentinel . --strict-coverage
 ```
 
 - `--format` accepts `text` (default), `json`, or `sarif`.
 - `--coverage` lists scanned and skipped file counts for path scans.
+- `--strict-coverage` also fails the scan when requested paths are missing,
+  unreadable, or oversized. Intentionally ignored paths and binary files are
+  reported but do not fail strict coverage.
 
 ### Exit codes
 
