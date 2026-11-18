@@ -4,6 +4,7 @@ import tempfile
 from unittest import TestCase
 
 from secret_sentinel.history import ScanHistory
+from secret_sentinel.remediation import get_remediation, get_remediation_preview
 from secret_sentinel.risk_scoring import (
     SeverityLevel,
     calculate_overall_severity,
@@ -18,11 +19,28 @@ class TestRiskScoring(TestCase):
         """Test that critical secrets are scored as CRITICAL."""
         assert get_risk_score("AWS Secret Access Key") == SeverityLevel.CRITICAL
         assert get_risk_score("GitHub Token") == SeverityLevel.CRITICAL
+        assert get_risk_score("Groq API Key") == SeverityLevel.CRITICAL
+        assert get_risk_score("Square Access Token") == SeverityLevel.CRITICAL
 
     def test_get_risk_score_high(self):
         """Test that high-risk secrets are scored as HIGH."""
         assert get_risk_score("JWT") == SeverityLevel.HIGH
         assert get_risk_score("Generic Secret Assignment") == SeverityLevel.HIGH
+        assert get_risk_score("Discord Bot Token") == SeverityLevel.HIGH
+        assert get_risk_score("Discord Webhook URL") == SeverityLevel.HIGH
+        assert get_risk_score("Postman API Key") == SeverityLevel.HIGH
+        assert get_risk_score("Sentry Token") == SeverityLevel.HIGH
+
+    def test_remediation_guidance(self):
+        """Test that specific remediation is returned for cloud and SaaS tokens."""
+        discord_remediation = get_remediation("Discord Bot Token")
+        assert any("Discord Developer Portal" in step for step in discord_remediation)
+        groq_remediation = get_remediation("Groq API Key")
+        assert any("Groq Console" in step for step in groq_remediation)
+        gitlab_remediation = get_remediation("GitLab Token")
+        assert any("GitLab" in step for step in gitlab_remediation)
+        preview = get_remediation_preview("Discord Bot Token")
+        assert "secrets manager" in preview
 
     def test_get_risk_score_medium(self):
         """Test that entropy strings are scored as MEDIUM."""
