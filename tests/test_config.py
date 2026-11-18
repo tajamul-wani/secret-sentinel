@@ -135,6 +135,33 @@ class TestConfig(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "conflicts with a built-in rule name"):
                 SecretSentinelConfig.load(tmpdir)
 
+    def test_load_allowlist(self) -> None:
+        """Allowlist values and patterns are parsed from config."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / ".secret-sentinel.ini"
+            config_path.write_text(
+                "[allowlist]\n"
+                "allowed_values = mock_token_123, test_dummy_456\n"
+                "allowed_patterns = \\bTEST_MOCK_[A-Za-z0-9]+\\b\n",
+                encoding="utf-8",
+            )
+            config = SecretSentinelConfig.load(tmpdir)
+            self.assertIn("mock_token_123", config.allowed_values)
+            self.assertIn("test_dummy_456", config.allowed_values)
+            self.assertEqual(len(config.allowed_patterns), 1)
+
+    def test_load_allowlist_invalid_regex(self) -> None:
+        """Invalid regex pattern in allowlist raises ValueError."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / ".secret-sentinel.ini"
+            config_path.write_text(
+                "[allowlist]\n"
+                "allowed_patterns = [invalid\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ValueError, "Invalid regex in allowed_patterns"):
+                SecretSentinelConfig.load(tmpdir)
+
 
 if __name__ == "__main__":
     unittest.main()

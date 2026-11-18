@@ -77,11 +77,15 @@ secret-sentinel --git-history
 ```bash
 secret-sentinel . --format json
 secret-sentinel . --format sarif --output results.sarif
+secret-sentinel . --format markdown
+secret-sentinel . --format csv --output report.csv
+secret-sentinel . --github-actions
 secret-sentinel . --coverage
 secret-sentinel . --strict-coverage
 ```
 
-- `--format` accepts `text` (default), `json`, or `sarif`.
+- `--format` accepts `text` (default), `json`, `sarif`, `markdown`, or `csv`.
+- `--github-actions` emits GitHub Actions workflow annotations (`::error` and `::warning`).
 - `--coverage` lists scanned and skipped file counts for path scans.
 - `--strict-coverage` also fails the scan when requested paths are missing,
   unreadable, or oversized. Intentionally ignored paths and binary files are
@@ -143,6 +147,7 @@ Optional inputs:
 |---|---|---|
 | `fail-on` | `LOW` | Minimum severity that fails the job |
 | `sarif` | `false` | Send results to code scanning (needs `security-events: write`) |
+| `annotations` | `true` | Emit inline GitHub Actions annotations on diff lines |
 
 What the action scans:
 
@@ -172,6 +177,10 @@ ignore_paths = tests/fixtures/*, docs/*.md
 
 [custom_rules]
 Internal Token = CRITICAL | \bcorp_[A-Za-z0-9]{32}\b
+
+[allowlist]
+allowed_values = mock_token_example, public_dummy_value
+allowed_patterns = \bTEST_MOCK_[A-Za-z0-9]+\b
 ```
 
 | Setting | Description |
@@ -179,6 +188,7 @@ Internal Token = CRITICAL | \bcorp_[A-Za-z0-9]{32}\b
 | `fail_on` | `LOW`, `MEDIUM`, `HIGH`, or `CRITICAL`. Default `LOW`. Override with `--fail-on`. |
 | `ignore_paths` | Comma-separated globs, relative to the repository root |
 | `custom_rules` | One rule per line: `NAME = SEVERITY \| REGEX` |
+| `allowlist` | Global allowed literal values (`allowed_values`) or regex patterns (`allowed_patterns`) |
 
 You can also list ignore globs in `.secretignore`, one per line.
 
@@ -236,9 +246,9 @@ python -c "import secrets; print(secrets.token_hex(32))"
 
 | Severity | Detects |
 |---|---|
-| Critical | Cloud and SaaS keys: AWS, Google, Azure Storage, Stripe, GitHub, GitLab, Slack, Twilio, SendGrid, Shopify, DigitalOcean, Databricks, OpenAI, Anthropic, Hugging Face, PyPI, npm |
-| Critical | Private keys, database URLs with passwords, `.netrc`, `.pgpass`, Docker registry auth |
-| High | JWTs, Slack webhooks, Telegram bot tokens, Mailchimp keys |
+| Critical | Cloud and SaaS keys: AWS, Google, Azure Storage, Stripe, GitHub, GitLab, Slack, Twilio, SendGrid, Shopify, DigitalOcean, Databricks, Groq, Square, OpenAI, Anthropic, Hugging Face, PyPI, npm |
+| Critical | Private keys (OpenSSH, RSA, EC, DSA, PGP blocks, PuTTY PPK), database URLs with passwords, `.netrc`, `.pgpass`, Docker registry auth |
+| High | Discord bot tokens and webhooks, Postman keys, Sentry tokens, JWTs, Slack webhooks, Telegram bot tokens, Mailchimp keys |
 | High | Generic `key`, `token`, `secret`, and `password` assignments |
 | Medium | AWS access key IDs and high-entropy values in secret fields |
 

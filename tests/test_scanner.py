@@ -556,6 +556,33 @@ class TestScanner(unittest.TestCase):
         issues = scan_text(content, "id_rsa")
         self.assertTrue(any(i["matcher"] == "Private Key" for i in issues))
 
+    def test_scan_text_detects_pgp_private_key(self) -> None:
+        """Detect PGP private key blocks."""
+        pgp_header = "-----BEGIN " + "PGP PRIVATE KEY BLOCK-----"
+        pgp_footer = "-----END " + "PGP PRIVATE KEY BLOCK-----"
+        content = f'{pgp_header}\nlPUEBF2...\n{pgp_footer}\n'
+        issues = scan_text(content, "key.asc")
+        self.assertTrue(any(i["matcher"] == "Private Key" for i in issues))
+
+    def test_scan_text_detects_putty_private_key(self) -> None:
+        """Detect PuTTY private key (.ppk) files."""
+        content = "PuTTY-User-Key-File-2: ssh-rsa\nEncryption: aes256-cbc\n"
+        issues = scan_text(content, "key.ppk")
+        self.assertTrue(any(i["matcher"] == "PuTTY Private Key" for i in issues))
+
+    def test_scan_text_with_allowed_values(self) -> None:
+        """Allowed values are ignored during text scanning."""
+        content = f'aws_key = "{DUMMY_AWS}"\n'
+        issues = scan_text(content, "config.py", allowed_values={DUMMY_AWS})
+        self.assertEqual(issues, [])
+
+    def test_scan_text_with_allowed_patterns(self) -> None:
+        """Allowed regex patterns ignore matching secret values."""
+        content = f'aws_key = "{DUMMY_AWS}"\n'
+        pattern = re.compile(r"^AKIA[0-9A-Z]{16}$")
+        issues = scan_text(content, "config.py", allowed_patterns=[pattern])
+        self.assertEqual(issues, [])
+
     def test_scan_text_detects_database_uri(self) -> None:
         """Detect database connection URIs with embedded passwords."""
         content = f'DATABASE_URL = "{DUMMY_DB_URI}"\n'

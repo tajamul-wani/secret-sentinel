@@ -53,6 +53,8 @@ class SecretSentinelConfig:
         fail_on: SeverityLevel = SeverityLevel.LOW,
         ai_cloud_enabled: bool = False,
         custom_rules: list[CustomRule] | None = None,
+        allowed_values: set[str] | None = None,
+        allowed_patterns: list[Pattern[str]] | None = None,
     ) -> None:
         """Initialize configuration object.
 
@@ -61,12 +63,17 @@ class SecretSentinelConfig:
             ai_enabled: Whether AI validation is enabled.
             ai_cloud_enabled: Whether cloud AI validation is enabled.
             fail_on: Minimum severity level that causes scan to fail.
+            custom_rules: Optional list of configured custom rules.
+            allowed_values: Optional set of allowed secret values to ignore.
+            allowed_patterns: Optional list of regex patterns for allowed values.
         """
         self.ignore_globs = ignore_globs
         self.ai_enabled = ai_enabled
         self.ai_cloud_enabled = ai_cloud_enabled
         self.fail_on = fail_on
         self.custom_rules = custom_rules or []
+        self.allowed_values = allowed_values or set()
+        self.allowed_patterns = allowed_patterns or []
 
     @classmethod
     def load(
@@ -92,6 +99,8 @@ class SecretSentinelConfig:
         ai_cloud_enabled = False
         fail_on = SeverityLevel.LOW
         custom_rules: list[CustomRule] = []
+        allowed_values: set[str] = set()
+        allowed_patterns: list[Pattern[str]] = []
 
         root_path = Path(repo_root)
 
@@ -157,6 +166,23 @@ class SecretSentinelConfig:
                             f"Custom rule {rule_name!r} must not match an empty string."
                         )
                     custom_rules.append(CustomRule(rule_name, pattern, severity))
+            if parser.has_section("allowlist"):
+                raw_values = parser.get("allowlist", "allowed_values", fallback="")
+                for item in re.split(r"[,\n]+", raw_values):
+                    cleaned = item.strip()
+                    if cleaned:
+                        allowed_values.add(cleaned)
+                raw_patterns = parser.get("allowlist", "allowed_patterns", fallback="")
+                for item in re.split(r"[,\n]+", raw_patterns):
+                    cleaned_pattern = item.strip()
+                    if cleaned_pattern:
+                        try:
+                            pattern = re.compile(cleaned_pattern)
+                        except re.error as exc:
+                            raise ValueError(
+                                f"Invalid regex in allowed_patterns {cleaned_pattern!r}: {exc}"
+                            ) from exc
+                        allowed_patterns.append(pattern)
 
         return cls(
             ignore_globs,
@@ -164,4 +190,6 @@ class SecretSentinelConfig:
             ai_cloud_enabled=ai_cloud_enabled,
             fail_on=fail_on,
             custom_rules=custom_rules,
+            allowed_values=allowed_values,
+            allowed_patterns=allowed_patterns,
         )

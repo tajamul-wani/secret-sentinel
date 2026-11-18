@@ -14,9 +14,14 @@ from .ai_validator import validate_issues
 from .baseline import ScanBaseline
 from .config import CustomRule, SecretSentinelConfig
 from .formatters import (
+    format_csv,
+    format_github_annotations,
     format_json,
+    format_markdown,
     format_sarif,
+    format_suppression_audit_csv,
     format_suppression_audit_json,
+    format_suppression_audit_markdown,
     format_suppression_audit_sarif,
     format_suppression_audit_text,
     format_text,
@@ -140,6 +145,11 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--github-actions",
+        action="store_true",
+        help="Emit GitHub Actions workflow annotations (::error / ::warning) for detected secrets.",
+    )
+    parser.add_argument(
         "--install-hook",
         action="store_true",
         help="Install secret-sentinel as a Git pre-commit hook in the current repository.",
@@ -223,9 +233,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--format",
-        choices=["text", "json", "sarif"],
+        choices=["text", "json", "sarif", "markdown", "csv"],
         default="text",
-        help="Output format: text, json, or sarif (default: text).",
+        help="Output format: text, json, sarif, markdown, or csv (default: text).",
     )
     parser.add_argument(
         "--output",
@@ -598,6 +608,8 @@ def run_suppression_audit(
         "text": format_suppression_audit_text,
         "json": format_suppression_audit_json,
         "sarif": format_suppression_audit_sarif,
+        "markdown": format_suppression_audit_markdown,
+        "csv": format_suppression_audit_csv,
     }
     report = formatters[output_format](suppressions)
     if output_path:
@@ -793,6 +805,8 @@ def scan_paths(
             ignore_globs=ignore_globs,
             repo_root=repo_root,
             custom_rules=active_custom_rules,
+            allowed_values=config.allowed_values,
+            allowed_patterns=config.allowed_patterns,
         )
     else:
         issues = scan_disk_paths(
@@ -801,6 +815,8 @@ def scan_paths(
             repo_root=repo_root,
             custom_rules=active_custom_rules,
             coverage=coverage,
+            allowed_values=config.allowed_values,
+            allowed_patterns=config.allowed_patterns,
         )
 
     if no_ai or not config.ai_enabled or not issues:
@@ -1315,6 +1331,19 @@ def main(argv: list[str] | None = None) -> int:
                 else None
             ),
         )
+    elif args.format == "markdown":
+        output_str = format_markdown(
+            issues,
+            fail_on=threshold,
+            baseline_suppressed=baseline_suppressed,
+            coverage=(
+                coverage.as_dict()
+                if args.coverage or args.strict_coverage or scan_incomplete
+                else None
+            ),
+        )
+    elif args.format == "csv":
+        output_str = format_csv(issues)
     else:
         output_str = format_text(
             issues,
@@ -1326,6 +1355,11 @@ def main(argv: list[str] | None = None) -> int:
                 else None
             ),
         )
+
+    if args.github_actions and issues:
+        annotations = format_github_annotations(issues)
+        if annotations:
+            print(annotations)
 
     if args.output:
         try:
