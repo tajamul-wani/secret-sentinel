@@ -11,6 +11,9 @@ inputs:
   sarif:
     description: "Upload results to code scanning instead of printing them. Needs security-events: write permission."
     default: "false"
+  annotations:
+    description: "Emit GitHub Actions workflow command annotations for findings."
+    default: "true"
 
 runs:
   using: composite
@@ -31,6 +34,7 @@ runs:
         BEFORE: ${{ github.event.before }}
         FAIL_ON: ${{ inputs.fail-on }}
         SARIF: ${{ inputs.sarif }}
+        ANNOTATIONS: ${{ inputs.annotations }}
       run: |
         # Range scans need history; checkout defaults to a single commit.
         if [[ "$(git rev-parse --is-shallow-repository)" == "true" ]]; then
@@ -40,6 +44,9 @@ runs:
         args=(--no-ai --fail-on "$FAIL_ON")
         if [[ "$SARIF" == "true" ]]; then
           args+=(--format sarif --output secret-sentinel.sarif)
+        fi
+        if [[ "$ANNOTATIONS" == "true" ]]; then
+          args+=(--github-actions)
         fi
 
         if [[ "$EVENT" == "pull_request" || "$EVENT" == "pull_request_target" ]]; then

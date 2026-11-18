@@ -1494,6 +1494,43 @@ class TestCLI(unittest.TestCase):
         ):
             self.assertEqual(main(["--format", "sarif", "--no-ai"]), 0)
 
+    def test_main_format_markdown(self) -> None:
+        """Main with --format markdown should return exit code 0 when clean."""
+        with (
+            patch("secret_sentinel.cli.scan_paths", return_value=[]),
+            patch("secret_sentinel.cli.get_git_root", return_value=None),
+        ):
+            self.assertEqual(main(["--format", "markdown", "--no-ai"]), 0)
+
+    def test_main_format_csv(self) -> None:
+        """Main with --format csv should return exit code 0 when clean."""
+        with (
+            patch("secret_sentinel.cli.scan_paths", return_value=[]),
+            patch("secret_sentinel.cli.get_git_root", return_value=None),
+        ):
+            self.assertEqual(main(["--format", "csv", "--no-ai"]), 0)
+
+    def test_main_github_actions_flag(self) -> None:
+        """Main with --github-actions should emit workflow commands when findings exist."""
+        mock_issue = [
+            {
+                "source": "app.py",
+                "line": 1,
+                "matcher": "AWS Secret Access Key",
+                "value": "AKIA1234567890ABCDEF",
+                "snippet": 'key = "AKIA1234567890ABCDEF"',
+                "severity": "CRITICAL",
+            }
+        ]
+        with (
+            patch("secret_sentinel.cli.scan_paths", return_value=mock_issue),
+            patch("secret_sentinel.cli.get_git_root", return_value=None),
+            patch("sys.stdout", new_callable=StringIO) as mock_stdout,
+        ):
+            result = main(["--github-actions", "--no-ai", "--fail-on", "LOW"])
+            self.assertEqual(result, 1)
+            self.assertIn("::error file=app.py,line=1", mock_stdout.getvalue())
+
     def test_main_output_to_file(self) -> None:
         """Main with --output should write report to target file."""
         with tempfile.TemporaryDirectory() as tmpdir:
