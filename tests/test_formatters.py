@@ -4,9 +4,14 @@ import json
 import unittest
 
 from secret_sentinel.formatters import (
+    format_csv,
+    format_github_annotations,
     format_json,
+    format_markdown,
     format_sarif,
+    format_suppression_audit_csv,
     format_suppression_audit_json,
+    format_suppression_audit_markdown,
     format_suppression_audit_sarif,
     format_suppression_audit_text,
     format_text,
@@ -411,6 +416,65 @@ class TestFormatters(unittest.TestCase):
         data = json.loads(format_json([issue]))
         steps = data["issues"][0]["remediation"]
         self.assertTrue(any("revoke or rotate it with its issuer" in step for step in steps))
+
+    def test_format_markdown_clean(self) -> None:
+        """Markdown output for a clean scan reports all clear."""
+        report = format_markdown([])
+        self.assertIn("# Secret Sentinel Scan Report", report)
+        self.assertIn("All clear! No potential secrets detected.", report)
+
+    def test_format_markdown_with_issues(self) -> None:
+        """Markdown output includes tables, severity badges, and remediation."""
+        report = format_markdown(self.sample_issues)
+        self.assertIn("# Secret Sentinel Scan Report", report)
+        self.assertIn("| **CRITICAL** |", report)
+        self.assertIn("[REDACTED]", report)
+        self.assertNotIn(DUMMY_AWS, report)
+        self.assertIn("### Remediation Steps", report)
+
+    def test_format_csv_clean(self) -> None:
+        """CSV output for clean scan returns header only."""
+        report = format_csv([])
+        self.assertEqual(
+            report,
+            "severity,source,line,matcher,confidence,reason,commit,snippet",
+        )
+
+    def test_format_csv_with_issues(self) -> None:
+        """CSV output formats findings with redacted snippets."""
+        report = format_csv(self.sample_issues)
+        lines = report.splitlines()
+        self.assertEqual(len(lines), 2)
+        self.assertIn("CRITICAL,src/config.py,15,AWS Secret Access Key", lines[1])
+        self.assertIn("[REDACTED]", lines[1])
+        self.assertNotIn(DUMMY_AWS, lines[1])
+
+    def test_format_suppression_audit_markdown(self) -> None:
+        """Markdown suppression audit formats tables and warnings."""
+        suppressions = [
+            {"source": "main.py", "line": 10, "target_line": 11, "statuses": ["missing-reason"]}
+        ]
+        report = format_suppression_audit_markdown(suppressions)
+        self.assertIn("# Suppression Audit", report)
+        self.assertIn("`main.py:10`", report)
+        self.assertIn("MISSING REASON", report)
+
+    def test_format_suppression_audit_csv(self) -> None:
+        """CSV suppression audit returns valid rows."""
+        suppressions = [
+            {"source": "main.py", "line": 10, "target_line": 11, "statuses": ["missing-reason"]}
+        ]
+        report = format_suppression_audit_csv(suppressions)
+        lines = report.splitlines()
+        self.assertEqual(lines[0], "source,line,target_line,statuses")
+        self.assertEqual(lines[1], "main.py,10,11,missing-reason")
+
+    def test_format_github_annotations(self) -> None:
+        """GitHub annotations format workflow command error/warning strings."""
+        annotations = format_github_annotations(self.sample_issues)
+        self.assertIn("::error file=src/config.py,line=15,title=Secret Sentinel [CRITICAL] [AWS Secret Access Key]::", annotations)
+        self.assertIn("[REDACTED]", annotations)
+        self.assertNotIn(DUMMY_AWS, annotations)
 
 
 if __name__ == "__main__":

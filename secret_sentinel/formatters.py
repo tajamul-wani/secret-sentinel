@@ -1,5 +1,7 @@
-"""Output formatters for Secret Sentinel scan results (Text, JSON, SARIF)."""
+"""Output formatters for Secret Sentinel scan results (Text, JSON, SARIF, Markdown, CSV)."""
 
+import csv
+import io
 import json
 from typing import Any
 
@@ -390,6 +392,221 @@ def format_sarif(
         )
     sarif_log["runs"][0]["properties"] = run_properties
     return json.dumps(sarif_log, indent=2)
+
+
+def format_markdown(
+    issues: list[dict[str, Any]],
+    fail_on: SeverityLevel | None = None,
+    baseline_suppressed: int = 0,
+    coverage: dict[str, int] | None = None,
+) -> str:
+    """Format scan issues into rich GitHub-Flavored Markdown.
+
+    Args:
+        issues: List of detected issues.
+        fail_on: Optional minimum severity level required to block.
+        baseline_suppressed: Count of baseline findings suppressed.
+        coverage: Optional scan coverage counts.
+
+    Returns:
+        Markdown string.
+    """
+    overall_severity = calculate_overall_severity(issues)
+    threshold = fail_on or SeverityLevel.LOW
+    incomplete = coverage is not None and (
+        coverage.get("unreadable_paths", 0) > 0
+        or coverage.get("missing_paths", 0) > 0
+        or coverage.get("oversized_files", 0) > 0
+    )
+
+    lines = ["# Secret Sentinel Scan Report\n"]
+    if incomplete:
+        lines.append("> **Status:** Scan incomplete. Some requested paths could not be checked.\n")
+    elif not issues:
+        msg = "> **Status:** All clear! No potential secrets detected."
+        if baseline_suppressed:
+            msg += f" ({baseline_suppressed} baseline finding(s) ignored)."
+        lines.append(msg + "\n")
+    elif overall_severity.value >= threshold.value:
+        lines.append(f"> **Status:** Blocked. Found potential secrets at or above `{threshold.name}` threshold.\n")
+    else:
+        lines.append(f"> **Status:** Passed with warnings. Detected findings are below `{threshold.name}` threshold.\n")
+
+    if issues:
+        severity_counts = {sev: 0 for sev in SeverityLevel}
+        for issue in issues:
+            severity_counts[get_issue_severity(issue)] += 1
+
+        lines.append("### Summary\n")
+        lines.append("| Metric | Value |")
+        lines.append("|---|---|")
+        lines.append(f"| **Total Findings** | {len(issues)} |")
+        lines.append(f"| **Overall Severity** | {overall_severity.name} |")
+        lines.append(f"| **Threshold** | {threshold.name} |")
+        if baseline_suppressed:
+            lines.append(f"| **Baseline Ignored** | {baseline_suppressed} |")
+        lines.append("")
+
+        lines.append("### Severity Breakdown\n")
+        lines.append("| Severity | Count |")
+        lines.append("|---|---|")
+        for sev in [SeverityLevel.CRITICAL, SeverityLevel.HIGH, SeverityLevel.MEDIUM, SeverityLevel.LOW]:
+            if severity_counts[sev] > 0:
+                lines.append(f"| {sev.name} | {severity_counts[sev]} |")
+        lines.append("")
+
+        lines.append("### Detected Secrets\n")
+        lines.append("| Severity | Location | Type | Confidence | Snippet |")
+        lines.append("|---|---|---|---|---|")
+        ordered_issues = sorted(
+            issues,
+            key=lambda issue: get_issue_severity(issue).value,
+            reverse=True,
+        )
+        for issue in ordered_issues:
+            sev = get_issue_severity(issue).name
+            loc = f"`{issue.get('source')}:{issue.get('line')}`"
+            matcher = issue.get("matcher", "Unknown")
+            conf = _get_confidence(issue)
+            raw_snippet = str(issue.get("snippet", ""))
+            secret_val = str(issue.get("value", ""))
+            safe_snip = sanitize_snippet(raw_snippet, secret_val).replace("|", "\\|")
+            lines.append(f"| **{sev}** | {loc} | {matcher} | {conf} | `{safe_snip}` |")
+        lines.append("")
+
+        seen_matchers = {str(i.get("matcher", "")) for i in issues}
+        lines.append("### Remediation Steps\n")
+        for matcher in sorted(seen_matchers):
+            steps = get_remediation(matcher)
+            lines.append(f"#### {matcher}")
+            for step in steps:
+                lines.append(f"- {step}")
+            lines.append("")
+
+    if coverage is not None:
+        lines.append("### Scan Coverage\n")
+        lines.append(f"- Scanned files: {coverage.get('scanned_files', 0)}")
+        lines.append(f"- Ignored paths: {coverage.get('ignored_paths', 0)}")
+        lines.append(f"- Binary files: {coverage.get('binary_files', 0)}")
+        lines.append(f"- Unreadable paths: {coverage.get('unreadable_paths', 0)}")
+        lines.append(f"- Missing paths: {coverage.get('missing_paths', 0)}")
+        lines.append(f"- Oversized files: {coverage.get('oversized_files', 0)}\n")
+
+    return "\n".join(lines).strip()
+
+
+def format_github_annotations(issues: list[dict[str, Any]]) -> str:
+    """Format scan issues as GitHub Actions workflow commands (::error / ::warning).
+
+    Args:
+        issues: List of detected issues.
+
+    Returns:
+        String containing newline-separated workflow commands.
+    """
+    lines = []
+    for issue in issues:
+        severity = get_issue_severity(issue).name
+        level = "error" if severity in ("CRITICAL", "HIGH") else "warning"
+        source = str(issue.get("source", ""))
+        line = issue.get("line", 1)
+        matcher = issue.get("matcher", "Secret")
+        raw_snippet = str(issue.get("snippet", ""))
+        secret_val = str(issue.get("value", ""))
+        safe_snippet = sanitize_snippet(raw_snippet, secret_val)
+        _, explanation = _get_detection_details(issue)
+        title = f"Secret Sentinel [{severity}] [{matcher}]"
+        message = f"{matcher} detected: {safe_snippet}. {explanation}"
+        lines.append(f"::{level} file={source},line={line},title={title}::{message}")
+    return "\n".join(lines)
+
+
+def format_csv(issues: list[dict[str, Any]]) -> str:
+    """Format scan issues into CSV format.
+
+    Args:
+        issues: List of detected issues.
+
+    Returns:
+        CSV string with redacted snippets.
+    """
+    output = io.StringIO()
+    writer = csv.writer(output, lineterminator="\n")
+    writer.writerow([
+        "severity",
+        "source",
+        "line",
+        "matcher",
+        "confidence",
+        "reason",
+        "commit",
+        "snippet",
+    ])
+    for issue in issues:
+        sev = get_issue_severity(issue).name
+        raw_snippet = str(issue.get("snippet", ""))
+        secret_val = str(issue.get("value", ""))
+        safe_snippet = sanitize_snippet(raw_snippet, secret_val)
+        writer.writerow([
+            sev,
+            issue.get("source", ""),
+            issue.get("line", ""),
+            issue.get("matcher", ""),
+            _get_confidence(issue),
+            issue.get("reason", ""),
+            issue.get("commit", ""),
+            safe_snippet,
+        ])
+    return output.getvalue().strip()
+
+
+def format_suppression_audit_markdown(suppressions: list[dict[str, Any]]) -> str:
+    """Format suppression audit records as Markdown.
+
+    Args:
+        suppressions: List of suppression audit records.
+
+    Returns:
+        Markdown string.
+    """
+    if not suppressions:
+        return "# Suppression Audit\n\nNo inline suppression directives found."
+    lines = ["# Suppression Audit\n"]
+    problem_count = sum(s.get("statuses") != ["active"] for s in suppressions)
+    if problem_count:
+        lines.append(f"> **Warning:** {problem_count} suppression(s) need review.\n")
+    else:
+        lines.append(f"> **Status:** All {len(suppressions)} suppression(s) are documented and active.\n")
+    lines.append("| Location | Target Line | Status |")
+    lines.append("|---|---|---|")
+    for s in suppressions:
+        loc = f"`{s.get('source')}:{s.get('line')}`"
+        target = str(s.get("target_line", "-"))
+        statuses = ", ".join(str(st).replace("-", " ").upper() for st in s.get("statuses", []))
+        lines.append(f"| {loc} | {target} | {statuses} |")
+    return "\n".join(lines)
+
+
+def format_suppression_audit_csv(suppressions: list[dict[str, Any]]) -> str:
+    """Format suppression audit records as CSV.
+
+    Args:
+        suppressions: List of suppression audit records.
+
+    Returns:
+        CSV string.
+    """
+    output = io.StringIO()
+    writer = csv.writer(output, lineterminator="\n")
+    writer.writerow(["source", "line", "target_line", "statuses"])
+    for s in suppressions:
+        writer.writerow([
+            s.get("source", ""),
+            s.get("line", ""),
+            s.get("target_line", ""),
+            ";".join(s.get("statuses", [])),
+        ])
+    return output.getvalue().strip()
 
 
 def format_suppression_audit_text(
