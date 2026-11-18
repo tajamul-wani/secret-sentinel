@@ -9,6 +9,7 @@ import subprocess
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
+from re import Pattern
 from typing import Any
 
 from .config import DEFAULT_IGNORE, CustomRule
@@ -37,7 +38,12 @@ SECRET_PATTERNS = {
     "Slack Token": re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{10,}\b"),
     "JWT": re.compile(r"\beyJ[0-9A-Za-z_\-]+\.[0-9A-Za-z_\-]+\.[0-9A-Za-z_\-]+\b"),
     "Twilio Secret Key": re.compile(r"\bSK[0-9a-fA-F]{32}\b"),
-    "Private Key": re.compile(r"-----BEGIN (?:[A-Z0-9_-]+\s)?PRIVATE KEY-----"),
+    "Private Key": re.compile(
+        r"-----BEGIN (?:[A-Z0-9_-]+\s)?(?:PRIVATE KEY|PGP PRIVATE KEY BLOCK)-----"
+    ),
+    "PuTTY Private Key": re.compile(
+        r"^PuTTY-User-Key-File-[23]:\s+ssh-(?:rsa|dss|ed25519|ecdsa)"
+    ),
     "Database Connection URI": re.compile(r"(?i)\b(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis|amqp[s]?):\/\/[^\s:]+:([^\s@]+)@[^\s/:]+"),
     "OpenAI API Key": re.compile(
         r"\bsk-(?!ant-)(?:proj-|svcacct-|admin-)?[A-Za-z0-9_-]{32,}\b"
@@ -57,6 +63,18 @@ SECRET_PATTERNS = {
     "Telegram Bot Token": re.compile(r"\b\d{8,10}:AA[A-Za-z0-9_-]{33}(?![A-Za-z0-9_-])"),
     "Databricks Token": re.compile(r"\bdapi[a-f0-9]{32}(?:-\d)?\b"),
     "Mailchimp API Key": re.compile(r"\b[0-9a-f]{32}-us\d{1,2}\b"),
+    "Discord Bot Token": re.compile(
+        r"\b(?!eyJ)(?:Bot\s+)?[A-Za-z0-9_-]{24,26}\.[A-Za-z0-9_-]{6}\.[A-Za-z0-9_-]{27,38}\b"
+    ),
+    "Discord Webhook URL": re.compile(
+        r"https://(?:ptb\.|canary\.)?discord(?:app)?\.com/api/webhooks/\d+/[A-Za-z0-9_-]+"
+    ),
+    "Groq API Key": re.compile(r"\bgsk_[A-Za-z0-9]{48,52}\b"),
+    "Postman API Key": re.compile(r"\bPMAK-[a-f0-9]{24}-[a-f0-9]{34}\b"),
+    "Square Access Token": re.compile(
+        r"\b(?:sq0atp-[0-9A-Za-z\-_]{22}|sq0csp-[0-9A-Za-z\-_]{43})\b"
+    ),
+    "Sentry Token": re.compile(r"\bsntryu_[a-f0-9]{64}\b"),
     "Generic Secret Assignment": re.compile(
         r"(?i)(?<![A-Za-z0-9])[A-Za-z0-9_-]*?"
         r"(?:api[_\-]?key|app[_\-]?key|secret(?:[_\-]?key(?:[_\-]?base)?)?"
@@ -67,7 +85,7 @@ SECRET_PATTERNS = {
     ),
 }
 PRIVATE_KEY_BLOCK_PATTERN = re.compile(
-    r"-----BEGIN (?P<key_type>[A-Z0-9 ]*PRIVATE KEY)-----"
+    r"-----BEGIN (?P<key_type>[A-Z0-9 ]*(?:PRIVATE KEY|PGP PRIVATE KEY BLOCK))-----"
     r".*?-----END (?P=key_type)-----",
     re.DOTALL,
 )
@@ -391,7 +409,7 @@ def _scan_line(
         for match in pattern.finditer(line):
             value = match.group(1) if match.groups() else match.group(0)
             if name == "Generic Secret Assignment" and any(
-                issue["value"] == value and issue["matcher"] != name
+                (issue["value"] == value or value in issue["value"]) and issue["matcher"] != name
                 for issue in issues
             ):
                 continue
@@ -540,6 +558,8 @@ def scan_text(
     content: str,
     source: str,
     custom_rules: list[CustomRule] | None = None,
+    allowed_values: set[str] | None = None,
+    allowed_patterns: list[Pattern[str]] | None = None,
 ) -> list[dict[str, Any]]:
     """Scan string content for known secret patterns and high-entropy strings.
 
@@ -641,6 +661,16 @@ def scan_text(
                 }
             )
             break
+    if allowed_values or allowed_patterns:
+        filtered = []
+        for issue in issues:
+            val = str(issue.get("value", ""))
+            if allowed_values and val in allowed_values:
+                continue
+            if allowed_patterns and any(pat.search(val) for pat in allowed_patterns):
+                continue
+            filtered.append(issue)
+        issues = filtered
     return issues
 
 
@@ -767,6 +797,8 @@ def scan_staged_files(
     ignore_globs: list[str] | None = None,
     repo_root: str | None = None,
     custom_rules: list[CustomRule] | None = None,
+    allowed_values: set[str] | None = None,
+    allowed_patterns: list[Pattern[str]] | None = None,
 ) -> list[dict[str, Any]]:
     """Scan all files currently staged in Git index.
 
@@ -788,7 +820,15 @@ def scan_staged_files(
         if content is None or _is_oversized(len(content), path):
             continue
         safe_path = _sanitize_source_path(path, effective_repo_root)
-        issues.extend(scan_text(content, safe_path, custom_rules=custom_rules))
+        issues.extend(
+            scan_text(
+                content,
+                safe_path,
+                custom_rules=custom_rules,
+                allowed_values=allowed_values,
+                allowed_patterns=allowed_patterns,
+            )
+        )
     return issues
 
 
@@ -1201,6 +1241,8 @@ def scan_paths(
     repo_root: str | None = None,
     custom_rules: list[CustomRule] | None = None,
     coverage: ScanCoverage | None = None,
+    allowed_values: set[str] | None = None,
+    allowed_patterns: list[Pattern[str]] | None = None,
 ) -> list[dict[str, Any]]:
     """Scan specified file and directory paths on disk.
 
@@ -1278,7 +1320,15 @@ def scan_paths(
                     if coverage is not None:
                         coverage.scanned_files += 1
                     safe_source = _sanitize_source_path(full_path, repo_root)
-                    issues.extend(scan_text(content, safe_source, custom_rules=custom_rules))
+                    issues.extend(
+                        scan_text(
+                            content,
+                            safe_source,
+                            custom_rules=custom_rules,
+                            allowed_values=allowed_values,
+                            allowed_patterns=allowed_patterns,
+                        )
+                    )
             continue
         if not os.path.isfile(path):
             if coverage is not None:
@@ -1307,7 +1357,15 @@ def scan_paths(
         if coverage is not None:
             coverage.scanned_files += 1
         safe_source = _sanitize_source_path(path, repo_root)
-        issues.extend(scan_text(content, safe_source, custom_rules=custom_rules))
+        issues.extend(
+            scan_text(
+                content,
+                safe_source,
+                custom_rules=custom_rules,
+                allowed_values=allowed_values,
+                allowed_patterns=allowed_patterns,
+            )
+        )
     return issues
 
 

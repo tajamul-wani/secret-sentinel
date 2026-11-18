@@ -88,6 +88,12 @@ def build_cases() -> list[DetectionCase]:
         "eyJzdWIiOiIxMjM0NTY3ODkwIn0."
         "doNotLeakThisSignature123"
     )
+    discord_bot_token = "NTE4MjY2ODk0MDYxNTY4MDAw.Xq_12A." + "1234567890abcdefghijklmnopqrst"
+    discord_webhook = "https://discord.com/api/webhooks/123456789012345678/abcdefghijklmnopqrstuvwxyz0123456789"
+    groq_api_key = "gsk_" + "1234567890abcdefghijklmnopqrstuvwxyz1234567890ab"
+    postman_api_key = "PMAK-" + "1234567890abcdef12345678" + "-" + "1234567890abcdef1234567890abcdef12"
+    square_token = "sq0atp-" + "1234567890abcdefghijkl"
+    sentry_token = "sntryu_" + "0123456789abcdef" * 4
     encoded_github_token = base64.b64encode(github_token.encode()).decode()
 
     return [
@@ -356,6 +362,57 @@ def build_cases() -> list[DetectionCase]:
             "High entropy string",
         ),
         DetectionCase("JWT", f'jwt = "{jwt}"', True, "JWT"),
+        DetectionCase(
+            "Discord bot token",
+            f'DISCORD_BOT_TOKEN = "{discord_bot_token}"',
+            True,
+            "Discord Bot Token",
+        ),
+        DetectionCase(
+            "Discord webhook URL",
+            f'webhook_url = "{discord_webhook}"',
+            True,
+            "Discord Webhook URL",
+        ),
+        DetectionCase(
+            "Groq API key",
+            f'groq_key = "{groq_api_key}"',
+            True,
+            "Groq API Key",
+        ),
+        DetectionCase(
+            "Postman API key",
+            f'postman_key = "{postman_api_key}"',
+            True,
+            "Postman API Key",
+        ),
+        DetectionCase(
+            "Square access token",
+            f'square_token = "{square_token}"',
+            True,
+            "Square Access Token",
+        ),
+        DetectionCase(
+            "Sentry token",
+            f'sentry_token = "{sentry_token}"',
+            True,
+            "Sentry Token",
+        ),
+        DetectionCase(
+            "Truncated Groq key",
+            'key = "gsk_short"',
+            False,
+        ),
+        DetectionCase(
+            "Truncated Postman key",
+            'key = "PMAK-short"',
+            False,
+        ),
+        DetectionCase(
+            "Truncated Sentry token",
+            'token = "sntryu_1234"',
+            False,
+        ),
         DetectionCase(
             "Password keyword argument",
             "        password=password,",
